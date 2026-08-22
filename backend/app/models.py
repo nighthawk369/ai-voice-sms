@@ -51,6 +51,7 @@ class Organization(Base):
     custom_fields = relationship("CustomField", back_populates="organization", cascade="all, delete-orphan")
     sessions = relationship("Session", back_populates="organization", cascade="all, delete-orphan")
     knowledge_base_items = relationship("KnowledgeBaseItem", back_populates="organization", cascade="all, delete-orphan")
+    billing_account = relationship("BillingAccount", back_populates="organization", uselist=False, cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Organization {self.name}>"
@@ -531,16 +532,242 @@ class Workflow(Base):
     organization_id = Column(UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False)
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
-    trigger_type = Column(String(100), nullable=False)  # call_received, deal_created, etc.
+    trigger_type = Column(String(100), nullable=False)  # call_received, contact_created, deal_won, etc.
     trigger_config = Column(JSON, default={})
+    conditions = Column(JSON, default=[])  # [{field, operator, value}]
     actions = Column(JSON, default=[])  # [{type, config}]
     is_active = Column(Boolean, default=True)
     execution_count = Column(Integer, default=0)
+    last_execution_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     # Relationships
     organization = relationship("Organization", back_populates="workflows")
+    executions = relationship("WorkflowExecution", back_populates="workflow", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_org_workflow_active", "organization_id", "is_active"),
+        Index("idx_workflow_trigger", "trigger_type"),
+    )
 
     def __repr__(self):
         return f"<Workflow {self.name}>"
+
+
+class WorkflowExecution(Base):
+    """Workflow execution history and logs"""
+
+    __tablename__ = "workflow_execution"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("workflow.id"), nullable=False)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False)
+    trigger_event_id = Column(String(255), nullable=True)  # Reference to the triggering event
+    trigger_data = Column(JSON, default={})
+    status = Column(String(50), default="PENDING")  # PENDING, RUNNING, SUCCESS, FAILED, SKIPPED
+    actions_executed = Column(Integer, default=0)
+    actions_failed = Column(Integer, default=0)
+    error_message = Column(Text, nullable=True)
+    execution_logs = Column(JSON, default=[])  # [{action_index, status, error, timestamp}]
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    workflow = relationship("Workflow", back_populates="executions")
+    organization = relationship("Organization")
+
+    __table_args__ = (
+        Index("idx_workflow_execution_status", "workflow_id", "status"),
+        Index("idx_execution_created", "created_at"),
+    )
+
+    def __repr__(self):
+        return f"<WorkflowExecution {self.id}>"
+
+
+class Event(Base):
+    """Event tracking for analytics"""
+
+    __tablename__ = "event"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False)
+    event_type = Column(String(100), nullable=False)  # call_started, call_ended, contact_created, deal_won, etc.
+    event_category = Column(String(50), nullable=False)  # CALL, CONTACT, DEAL, CRM, API
+    user_id = Column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=True)
+    contact_id = Column(UUID(as_uuid=True), ForeignKey("contact.id"), nullable=True)
+    deal_id = Column(UUID(as_uuid=True), ForeignKey("deal.id"), nullable=True)
+    resource_type = Column(String(100), nullable=True)
+    resource_id = Column(String(255), nullable=True)
+    properties = Column(JSON, default={})  # Custom event properties
+    timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    organization = relationship("Organization")
+
+    __table_args__ = (
+        Index("idx_org_event_type", "organization_id", "event_type"),
+        Index("idx_event_timestamp", "timestamp"),
+        Index("idx_org_contact_event", "organization_id", "contact_id", "event_type"),
+    )
+
+    def __repr__(self):
+        return f"<Event {self.event_type}>"
+
+
+class Metric(Base):
+    """Pre-aggregated metrics for analytics dashboard"""
+
+    __tablename__ = "metric"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False)
+    metric_name = Column(String(100), nullable=False)  # calls_made, conversion_rate, avg_call_duration, etc.
+    metric_type = Column(String(50), nullable=False)  # COUNT, AVERAGE, SUM, PERCENTAGE
+    dimension = Column(String(100), nullable=True)  # daily, weekly, monthly, by_user, by_contact_type
+    dimension_value = Column(String(255), nullable=True)  # The actual dimension value
+    value = Column(Numeric(12, 4), nullable=False)
+    period_date = Column(DateTime(timezone=True), nullable=False)  # Date this metric is for
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    organization = relationship("Organization")
+
+    __table_args__ = (
+        Index("idx_org_metric_date", "organization_id", "metric_name", "period_date"),
+        Index("idx_metric_dimension", "metric_name", "dimension"),
+    )
+
+    def __repr__(self):
+        return f"<Metric {self.metric_name}>"
+
+
+class UsageMetric(Base):
+    """API usage tracking and metering"""
+
+    __tablename__ = "usage_metric"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False)
+    metric_type = Column(String(100), nullable=False)  # api_calls, tokens_used, voice_minutes, sms_sent
+    unit = Column(String(50), nullable=False)  # count, tokens, minutes, count
+    quantity = Column(Integer, default=1)
+    unit_cost = Column(Numeric(8, 6), default=0)  # Cost per unit
+    total_cost = Column(Numeric(8, 4), default=0)
+    metadata = Column(JSON, default={})  # api_endpoint, call_duration, model_name, etc.
+    period_start = Column(DateTime(timezone=True), nullable=False)
+    period_end = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    organization = relationship("Organization")
+
+    __table_args__ = (
+        Index("idx_org_usage_metric", "organization_id", "metric_type", "created_at"),
+        Index("idx_usage_period", "period_start", "period_end"),
+    )
+
+    def __repr__(self):
+        return f"<UsageMetric {self.metric_type}>"
+
+
+class BillingAccount(Base):
+    """Billing and subscription account"""
+
+    __tablename__ = "billing_account"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False, unique=True)
+    stripe_customer_id = Column(String(255), nullable=True, unique=True)
+    stripe_subscription_id = Column(String(255), nullable=True)
+    billing_email = Column(String(255), nullable=False)
+    billing_name = Column(String(255), nullable=False)
+    subscription_tier = Column(String(50), default="STARTER")  # STARTER, PROFESSIONAL, ENTERPRISE
+    billing_cycle = Column(String(50), default="MONTHLY")  # MONTHLY, ANNUAL, USAGE_BASED
+    billing_day = Column(Integer, default=1)
+    current_period_start = Column(DateTime(timezone=True), nullable=False)
+    current_period_end = Column(DateTime(timezone=True), nullable=False)
+    next_billing_date = Column(DateTime(timezone=True), nullable=False)
+    status = Column(String(50), default="ACTIVE")  # ACTIVE, PAST_DUE, CANCELLED, SUSPENDED
+    payment_method = Column(JSON, default={})  # {type, last4, brand}
+    auto_renew = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    organization = relationship("Organization")
+    invoices = relationship("Invoice", back_populates="billing_account", cascade="all, delete-orphan")
+    line_items = relationship("InvoiceLineItem", back_populates="billing_account", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_org_billing", "organization_id"),
+        Index("idx_stripe_customer", "stripe_customer_id"),
+    )
+
+    def __repr__(self):
+        return f"<BillingAccount {self.organization_id}>"
+
+
+class Invoice(Base):
+    """Invoice for billing"""
+
+    __tablename__ = "invoice"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    billing_account_id = Column(UUID(as_uuid=True), ForeignKey("billing_account.id"), nullable=False)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("organization.id"), nullable=False)
+    stripe_invoice_id = Column(String(255), nullable=True, unique=True)
+    invoice_number = Column(String(50), nullable=False, unique=True)
+    status = Column(String(50), default="DRAFT")  # DRAFT, SENT, PAID, FAILED, REFUNDED
+    invoice_date = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    due_date = Column(DateTime(timezone=True), nullable=False)
+    period_start = Column(DateTime(timezone=True), nullable=False)
+    period_end = Column(DateTime(timezone=True), nullable=False)
+    subtotal = Column(Numeric(10, 2), default=0)
+    tax_amount = Column(Numeric(10, 2), default=0)
+    discount_amount = Column(Numeric(10, 2), default=0)
+    total_amount = Column(Numeric(10, 2), default=0)
+    currency = Column(String(3), default="USD")
+    paid_at = Column(DateTime(timezone=True), nullable=True)
+    memo = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    billing_account = relationship("BillingAccount", back_populates="invoices")
+    organization = relationship("Organization")
+    line_items = relationship("InvoiceLineItem", back_populates="invoice", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_org_invoice", "organization_id", "invoice_date"),
+        Index("idx_invoice_status", "status"),
+    )
+
+    def __repr__(self):
+        return f"<Invoice {self.invoice_number}>"
+
+
+class InvoiceLineItem(Base):
+    """Line items for invoice"""
+
+    __tablename__ = "invoice_line_item"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    invoice_id = Column(UUID(as_uuid=True), ForeignKey("invoice.id"), nullable=False)
+    billing_account_id = Column(UUID(as_uuid=True), ForeignKey("billing_account.id"), nullable=False)
+    description = Column(String(255), nullable=False)
+    quantity = Column(Numeric(12, 4), nullable=False)
+    unit_price = Column(Numeric(10, 4), nullable=False)
+    amount = Column(Numeric(10, 2), nullable=False)
+    metadata = Column(JSON, default={})  # usage, pricing_tier, etc.
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    invoice = relationship("Invoice", back_populates="line_items")
+    billing_account = relationship("BillingAccount", back_populates="line_items")
+
+    def __repr__(self):
+        return f"<InvoiceLineItem {self.description}>"
