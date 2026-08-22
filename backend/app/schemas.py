@@ -507,4 +507,142 @@ class SyncResult(BaseModel):
     status: str
     synced_count: int
     error_count: int
+
+
+# ============================================================================
+# WORKFLOW SCHEMAS (PHASE 18)
+# ============================================================================
+
+class WorkflowAction(BaseModel):
+    type: str
+    config: dict = {}
+
+
+class WorkflowCondition(BaseModel):
+    field: str
+    operator: str
+    value: str
+
+
+class WorkflowCreateSchema(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    trigger_type: str
+    trigger_config: Optional[dict] = None
+    conditions: Optional[List[dict]] = None
+    actions: Optional[List[dict]] = None
+    is_active: Optional[bool] = True
+
+
+class WorkflowUpdateSchema(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    conditions: Optional[List[dict]] = None
+    actions: Optional[List[dict]] = None
+    is_active: Optional[bool] = None
+
+
+class WorkflowResponseSchema(BaseModel):
+    id: str
+    name: str
+    trigger_type: str
+    is_active: bool
+    execution_count: int
+    created_at: datetime
+
+
+# ============================================================================
+# ANALYTICS SCHEMAS (PHASE 19)
+# ============================================================================
+
+class EventTrackingSchema(BaseModel):
+    event_type: str
+    event_category: str
+    resource_type: Optional[str] = None
+    resource_id: Optional[str] = None
+    properties: Optional[dict] = None
+
+
+class AnalyticsMetricSchema(BaseModel):
+    metric_name: str
+    metric_type: str
+    value: float
+    dimension: Optional[str] = None
+    dimension_value: Optional[str] = None
+
+
+class DashboardSummarySchema(BaseModel):
+    period: dict
+    calls: dict
+    conversion_funnel: dict
+
+
+# ============================================================================
+# USAGE METERING SCHEMAS (PHASE 20)
+# ============================================================================
+
+class UsageMetricSchema(BaseModel):
+    metric_type: str
+    quantity: int
+    unit: str
+    cost: float
+
+
+class UsageReportSchema(BaseModel):
+    period: dict
+    usage_by_type: dict
+    total_cost: float
+
+
+class TokenCountSchema(BaseModel):
+    text: str
+    provider: Optional[str] = "openai"
+
+
+# ============================================================================
+# BILLING SCHEMAS (PHASE 21)
+# ============================================================================
+
+class BillingAccountCreateSchema(BaseModel):
+    billing_email: str = Field(..., regex=r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+    billing_name: str = Field(..., min_length=1, max_length=255)
+    tier: Optional[str] = "STARTER"
+
+
+class BillingAccountSchema(BaseModel):
+    id: str
+    organization_id: str
+    billing_email: str
+    subscription_tier: str
+    status: str
+    current_period_start: datetime
+    current_period_end: datetime
+    next_billing_date: datetime
+
+
+class SubscriptionUpgradeSchema(BaseModel):
+    new_tier: str
+
+
+class InvoiceLineItemSchema(BaseModel):
+    description: str
+    quantity: float
+    unit_price: float
+    amount: float
+
+
+class InvoiceSchema(BaseModel):
+    id: str
+    invoice_number: str
+    status: str
+    total_amount: float
+    currency: str
+    invoice_date: datetime
+    due_date: datetime
+    line_items: List[InvoiceLineItemSchema]
+
+
+class PaymentProcessingSchema(BaseModel):
+    invoice_id: str
+    payment_method_id: Optional[str] = None
     errors: List[str] = []
