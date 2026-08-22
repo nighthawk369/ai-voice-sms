@@ -108,3 +108,250 @@ class ReadinessResponse(BaseModel):
     database: bool
     redis: bool
     timestamp: datetime
+
+
+# ============================================================================
+# CRM SCHEMAS - CONTACT
+# ============================================================================
+
+class ContactCreate(BaseModel):
+    first_name: str = Field(..., min_length=1, max_length=100)
+    last_name: str = Field(..., min_length=1, max_length=100)
+    email: Optional[str] = None
+    phone: str = Field(..., min_length=10)
+    secondary_phone: Optional[str] = None
+    company_id: Optional[UUID] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip_code: Optional[str] = None
+    country: Optional[str] = None
+    contact_type: str = "LEAD"
+    source: Optional[str] = None
+    notes: Optional[str] = None
+    custom_fields: dict = {}
+
+
+class ContactUpdate(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    contact_type: Optional[str] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+    custom_fields: Optional[dict] = None
+
+
+class ContactRead(BaseModel):
+    id: UUID
+    first_name: str
+    last_name: str
+    email: Optional[str]
+    phone: str
+    contact_type: str
+    status: str
+    source: Optional[str]
+    notes: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================================================
+# CRM SCHEMAS - COMPANY
+# ============================================================================
+
+class CompanyCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    industry: Optional[str] = None
+    website: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip_code: Optional[str] = None
+    country: Optional[str] = None
+    employee_count: Optional[int] = None
+    annual_revenue: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class CompanyRead(BaseModel):
+    id: UUID
+    name: str
+    industry: Optional[str]
+    website: Optional[str]
+    phone: Optional[str]
+    company_status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================================================
+# CRM SCHEMAS - DEAL
+# ============================================================================
+
+class DealCreate(BaseModel):
+    contact_id: UUID
+    company_id: Optional[UUID] = None
+    pipeline_id: UUID
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    amount: Optional[float] = None
+    stage: str
+    probability: float = 50.0
+    expected_close_date: Optional[datetime] = None
+
+
+class DealRead(BaseModel):
+    id: UUID
+    name: str
+    amount: Optional[float]
+    stage: str
+    deal_status: str
+    probability: float
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================================================
+# CRM SCHEMAS - ACTIVITY
+# ============================================================================
+
+class ActivityCreate(BaseModel):
+    contact_id: UUID
+    deal_id: Optional[UUID] = None
+    activity_type: str  # CALL, EMAIL, MEETING, NOTE, TASK
+    title: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    duration_seconds: Optional[int] = None
+    scheduled_for: Optional[datetime] = None
+
+
+class ActivityRead(BaseModel):
+    id: UUID
+    contact_id: UUID
+    activity_type: str
+    title: str
+    description: Optional[str]
+    completed_at: Optional[datetime]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================================================
+# CONVERSATION SCHEMAS
+# ============================================================================
+
+class MessageCreate(BaseModel):
+    role: str  # user, assistant, system
+    content: str = Field(..., min_length=1)
+    metadata: Optional[dict] = {}
+
+
+class MessageRead(BaseModel):
+    id: UUID
+    role: str
+    content: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ConversationCreate(BaseModel):
+    conversation_type: str  # VOICE, SMS, CHAT
+    phone_number: Optional[str] = None
+    contact_id: Optional[UUID] = None
+
+
+class ConversationRead(BaseModel):
+    id: UUID
+    conversation_type: str
+    status: str
+    phone_number: Optional[str]
+    transcript: Optional[str]
+    intent: Optional[str]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ConversationDetail(ConversationRead):
+    messages: List[MessageRead]
+
+
+# ============================================================================
+# INTEGRATION SCHEMAS
+# ============================================================================
+
+class IntegrationCreate(BaseModel):
+    integration_type: str
+    name: str
+    config: dict = {}
+
+
+class IntegrationRead(BaseModel):
+    id: UUID
+    integration_type: str
+    name: str
+    is_active: bool
+    sync_status: str
+    last_sync_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================================================
+# WORKFLOW SCHEMAS
+# ============================================================================
+
+class WorkflowCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    trigger_type: str
+    trigger_config: dict = {}
+    actions: List[dict] = []
+
+
+class WorkflowRead(BaseModel):
+    id: UUID
+    name: str
+    trigger_type: str
+    is_active: bool
+    execution_count: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================================================
+# PAGINATION SCHEMAS
+# ============================================================================
+
+class PaginationParams(BaseModel):
+    skip: int = 0
+    limit: int = 100
+    sort_by: Optional[str] = None
+    sort_order: str = "asc"
+
+
+class PaginatedResponse(BaseModel):
+    total: int
+    skip: int
+    limit: int
+    items: List
+    has_more: bool
