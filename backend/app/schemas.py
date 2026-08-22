@@ -9,6 +9,7 @@ from typing import Optional, List
 # Organization Schemas
 class OrganizationCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
+    business_type: str = "general_contractor"
     timezone: str = "America/New_York"
     locale: str = "en_US"
 
@@ -16,6 +17,8 @@ class OrganizationCreate(BaseModel):
 class OrganizationRead(BaseModel):
     id: UUID
     name: str
+    business_type: str
+    industry_category: str
     timezone: str
     locale: str
     created_at: datetime
@@ -32,6 +35,7 @@ class UserCreate(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     org_name: Optional[str] = None  # For signup
+    business_type: Optional[str] = "general_contractor"  # HVAC, Restaurant, Hotel, etc.
 
 
 class UserLogin(BaseModel):

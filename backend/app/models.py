@@ -11,6 +11,65 @@ import enum
 
 
 # ============================================================================
+# ENUMS
+# ============================================================================
+
+class BusinessType(str, enum.Enum):
+    """Business types supported by the platform"""
+    # Service-based
+    HVAC = "hvac"
+    ELECTRICAL = "electrical"
+    PLUMBING = "plumbing"
+    ROOFING = "roofing"
+    LANDSCAPING = "landscaping"
+    CLEANING = "cleaning"
+    GENERAL_CONTRACTOR = "general_contractor"
+
+    # Retail & F&B
+    RESTAURANT = "restaurant"
+    RETAIL = "retail"
+    SALON = "salon"
+    GYM = "gym"
+    BOUTIQUE = "boutique"
+
+    # Professional
+    LAW_FIRM = "law_firm"
+    MEDICAL = "medical"
+    DENTAL = "dental"
+    CONSULTING = "consulting"
+    ACCOUNTING = "accounting"
+    INSURANCE = "insurance"
+
+    # Hospitality
+    HOTEL = "hotel"
+    BED_BREAKFAST = "bed_breakfast"
+    TRAVEL = "travel"
+    EVENT_VENUE = "event_venue"
+
+    # Education
+    TUTORING = "tutoring"
+    LANGUAGE_SCHOOL = "language_school"
+    BOOTCAMP = "bootcamp"
+    FITNESS = "fitness"
+    MUSIC = "music"
+
+    # Real Estate
+    REAL_ESTATE = "real_estate"
+    PROPERTY_MANAGEMENT = "property_management"
+    APARTMENT_LEASING = "apartment_leasing"
+
+
+class IndustryCategory(str, enum.Enum):
+    """Industry categories for grouping business types"""
+    SERVICE = "service"
+    RETAIL = "retail"
+    PROFESSIONAL = "professional"
+    HOSPITALITY = "hospitality"
+    EDUCATION = "education"
+    REAL_ESTATE = "real_estate"
+
+
+# ============================================================================
 # CORE PLATFORM MODELS
 # ============================================================================
 
@@ -21,11 +80,13 @@ class Organization(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     name = Column(String(255), nullable=False)
+    business_type = Column(String(50), default=BusinessType.GENERAL_CONTRACTOR.value)
+    industry_category = Column(String(50), default=IndustryCategory.SERVICE.value)
     timezone = Column(String(50), default="America/New_York")
     locale = Column(String(10), default="en_US")
     phone = Column(String(20), nullable=True)
     website = Column(String(255), nullable=True)
-    industry = Column(String(100), nullable=True)  # HVAC, Plumbing, Electrical, etc.
+    industry = Column(String(100), nullable=True)  # Legacy field
     subscription_plan = Column(String(50), default="BASIC")  # BASIC, PROFESSIONAL, ENTERPRISE
     subscription_status = Column(String(50), default="ACTIVE")  # ACTIVE, TRIAL, SUSPENDED, CANCELLED
     trial_ends_at = Column(DateTime(timezone=True), nullable=True)
@@ -33,6 +94,8 @@ class Organization(Base):
     max_contacts = Column(Integer, default=10000)
     max_calls_per_month = Column(Integer, default=1000)
     billing_email = Column(String(255), nullable=True)
+    features_enabled = Column(JSON, default={})  # Track enabled features per industry
+    workflows_enabled = Column(JSON, default={})  # Track enabled workflows
     metadata = Column(JSON, default={})
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
