@@ -2,6 +2,7 @@
 
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+from typing import List
 
 
 class Settings(BaseSettings):
@@ -12,6 +13,13 @@ class Settings(BaseSettings):
     APP_VERSION: str = "0.1.0"
     ENVIRONMENT: str = "development"
     LOG_LEVEL: str = "INFO"
+
+    # CORS - Environment-aware
+    CORS_ORIGINS: List[str] = [
+        "http://localhost:3000",
+        "http://localhost:8081",
+        "http://localhost:8000",
+    ]
 
     # Database
     DATABASE_URL: str
@@ -86,6 +94,21 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+
+    def get_cors_origins(self) -> List[str]:
+        """Get CORS origins based on environment"""
+        if self.ENVIRONMENT == "production":
+            return [
+                "https://app.callsync.io",
+                "https://mobile.callsync.io",
+            ]
+        elif self.ENVIRONMENT == "staging":
+            return [
+                "https://staging.callsync.io",
+                "http://localhost:3000",
+            ]
+        else:  # development
+            return self.CORS_ORIGINS
 
 
 @lru_cache()
