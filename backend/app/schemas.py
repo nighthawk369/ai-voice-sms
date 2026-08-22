@@ -355,3 +355,156 @@ class PaginatedResponse(BaseModel):
     limit: int
     items: List
     has_more: bool
+
+
+# ============================================================================
+# KNOWLEDGE BASE SCHEMAS (PHASE 8)
+# ============================================================================
+
+class KnowledgeBaseItemCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    content: str = Field(..., min_length=1)
+    category: Optional[str] = None
+    tags: Optional[List[str]] = []
+    is_published: bool = False
+
+
+class KnowledgeBaseItemUpdate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    category: Optional[str] = None
+    tags: Optional[List[str]] = None
+    is_published: Optional[bool] = None
+    order: Optional[int] = None
+
+
+class KnowledgeBaseItemRead(BaseModel):
+    id: UUID
+    title: str
+    content: str
+    category: Optional[str]
+    tags: List[str]
+    is_published: bool
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================================================
+# VOICE INTEGRATION SCHEMAS (PHASE 9)
+# ============================================================================
+
+class VoiceCallCreate(BaseModel):
+    to_phone: str
+    contact_id: Optional[UUID] = None
+
+
+class VoiceCallRead(BaseModel):
+    call_id: str
+    status: str
+    phone_number: str
+    duration: int
+    transcript: Optional[str]
+    created_at: str
+
+
+class CallMessageCreate(BaseModel):
+    role: str
+    content: str
+
+
+class CallMessageRead(BaseModel):
+    id: str
+    role: str
+    content: str
+    created_at: str
+
+
+# ============================================================================
+# SMS INTEGRATION SCHEMAS (PHASE 10)
+# ============================================================================
+
+class SMSSendCreate(BaseModel):
+    to_phone: str
+    message_text: str
+    contact_id: Optional[UUID] = None
+
+
+class SMSConversationRead(BaseModel):
+    conversation_id: str
+    phone_number: str
+    status: str
+    last_message_at: str
+    message_count: int
+
+
+class SMSBatchCreate(BaseModel):
+    recipients: List[dict]
+    message_text: str
+
+
+class OptOutCreate(BaseModel):
+    phone: str
+    reason: str = "user_requested"
+
+
+# ============================================================================
+# CALENDAR INTEGRATION SCHEMAS (PHASE 11)
+# ============================================================================
+
+class AvailabilitySlot(BaseModel):
+    start_time: str
+    end_time: str
+    duration_minutes: int
+    provider: Optional[str] = None
+
+
+class AppointmentCreate(BaseModel):
+    provider: str
+    user_id: UUID
+    contact_id: UUID
+    start_time: str
+    end_time: str
+    title: str
+    description: Optional[str] = None
+
+
+class AppointmentRead(BaseModel):
+    appointment_id: str
+    status: str
+    start_time: str
+    end_time: str
+    title: str
+
+
+# ============================================================================
+# INTEGRATION ENGINE SCHEMAS (PHASE 12)
+# ============================================================================
+
+class IntegrationCreateRequest(BaseModel):
+    integration_type: str
+    name: str
+    credentials: dict = {}
+
+
+class IntegrationReadResponse(BaseModel):
+    id: str
+    type: str
+    name: str
+    is_active: bool
+    sync_status: str
+
+
+class WebhookPayload(BaseModel):
+    system: str
+    event_type: str
+    payload: dict
+
+
+class SyncResult(BaseModel):
+    status: str
+    synced_count: int
+    error_count: int
+    errors: List[str] = []

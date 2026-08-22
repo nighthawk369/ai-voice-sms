@@ -10,6 +10,7 @@ from app.config import get_settings
 from app.routes import router
 from app.routes_enhanced import router_enhanced
 from app.routes_orchestrator import router as router_orchestrator
+from app.routes_phases_8_12 import router as router_phases_8_12
 from app.db import init_db
 
 settings = get_settings()
@@ -64,6 +65,7 @@ app.add_middleware(
 app.include_router(router, prefix="/api/v1")
 app.include_router(router_enhanced, prefix="/api/v1")
 app.include_router(router_orchestrator)
+app.include_router(router_phases_8_12)
 
 
 # Root endpoint
