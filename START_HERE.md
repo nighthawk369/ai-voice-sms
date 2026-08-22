@@ -51,6 +51,17 @@
    
    **Use**: Plan your approach, set realistic expectations, decide when to pivot.
 
+### 5. **GCP_TERRAFORM_SUMMARY.md** (Infrastructure-as-Code)
+   Complete Infrastructure-as-Code for Google Cloud Platform:
+   - VPC, Cloud SQL, Cloud Memorystore Redis setup
+   - Cloud Run services for API and Web frontend
+   - Cloud Storage, Secret Manager, monitoring
+   - Dev, staging, production environments
+   - 13 Terraform files, 2,100+ lines of configuration
+   - Complete deployment guide and Makefile automation
+   
+   **Use**: Deploy to GCP with `make apply ENVIRONMENT=dev` after PHASE 0.
+
 ---
 
 ## 🎯 YOUR DECISIONS (Locked In)
@@ -235,12 +246,14 @@ Likely scenario: 14-20 months
 **Mobile**: React Native + Expo + TypeScript  
 **Database**: PostgreSQL 15 + Pgvector (for embeddings)  
 **Cache**: Redis 7  
-**Infrastructure**: Docker + Terraform + AWS (ECS, RDS, S3)  
+**Infrastructure**: Docker + Terraform + GCP (Cloud Run, Cloud SQL, Memorystore)  
 **CI/CD**: GitHub Actions  
 **Testing**: Pytest + Vitest + Playwright  
 **Linting**: Ruff + Black + ESLint + Prettier  
+**IaC**: Terraform for dev/staging/production on GCP  
 
 **All choices rationalized in MASTER_SPECIFICATION.md section 3**
+**GCP infrastructure ready to deploy via GCP_TERRAFORM_SUMMARY.md**
 
 ---
 
