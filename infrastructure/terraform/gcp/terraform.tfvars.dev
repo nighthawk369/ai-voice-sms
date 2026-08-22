@@ -1,0 +1,32 @@
+project_id = "ai-platform-dev"
+region      = "us-central1"
+environment = "dev"
+app_name    = "ai-platform"
+
+# Database configuration
+database_version        = "15"
+database_instance_type  = "db-f1-micro"
+
+# Redis configuration
+redis_memory_size = 1
+redis_tier        = "BASIC"
+
+# Cloud Run - API configuration
+api_memory       = 512
+api_cpu          = "1"
+api_max_instances = 5
+
+# Cloud Run - Web configuration
+web_memory       = 256
+web_cpu          = "1"
+web_max_instances = 3
+
+# Ingress
+allowed_ingress = "ALLOW_ALL"
+
+# Labels
+labels = {
+  environment = "dev"
+  managed_by  = "terraform"
+  team        = "platform"
+}

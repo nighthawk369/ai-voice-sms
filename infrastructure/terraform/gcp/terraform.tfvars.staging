@@ -1,0 +1,32 @@
+project_id = "ai-platform-staging"
+region      = "us-central1"
+environment = "staging"
+app_name    = "ai-platform"
+
+# Database configuration
+database_version        = "15"
+database_instance_type  = "db-n1-standard-1"
+
+# Redis configuration
+redis_memory_size = 2
+redis_tier        = "STANDARD"
+
+# Cloud Run - API configuration
+api_memory       = 1024
+api_cpu          = "2"
+api_max_instances = 10
+
+# Cloud Run - Web configuration
+web_memory       = 512
+web_cpu          = "2"
+web_max_instances = 8
+
+# Ingress
+allowed_ingress = "ALLOW_ALL"
+
+# Labels
+labels = {
+  environment = "staging"
+  managed_by  = "terraform"
+  team        = "platform"
+}
