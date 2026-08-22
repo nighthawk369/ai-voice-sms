@@ -1,0 +1,157 @@
+name: Deploy
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+
+jobs:
+  deploy-dev:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment:
+      name: development
+      url: https://dev.ai-voice-sms.com
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+
+    - name: Set up Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+        terraform_version: 1.6.0
+
+    - name: Terraform Init
+      run: |
+        cd infrastructure/terraform/aws
+        terraform init
+
+    - name: Terraform Plan
+      run: |
+        cd infrastructure/terraform/aws
+        terraform plan -var-file="environments/dev-ultra-optimized.tfvars" -out=tfplan
+
+    - name: Terraform Apply
+      run: |
+        cd infrastructure/terraform/aws
+        terraform apply -auto-approve tfplan
+
+    - name: Get outputs
+      id: deploy
+      run: |
+        cd infrastructure/terraform/aws
+        echo "alb_dns=$(terraform output -raw alb_dns_name 2>/dev/null || echo 'pending')" >> $GITHUB_OUTPUT
+        echo "rds_endpoint=$(terraform output -raw rds_endpoint 2>/dev/null || echo 'pending')" >> $GITHUB_OUTPUT
+
+    - name: Update ECS service
+      run: |
+        aws ecs update-service \
+          --cluster ai-voice-sms-dev \
+          --service ai-voice-sms-api \
+          --force-new-deployment || true
+
+    - name: Wait for deployment
+      run: |
+        aws ecs wait services-stable \
+          --cluster ai-voice-sms-dev \
+          --services ai-voice-sms-api || true
+
+    - name: Smoke tests
+      run: |
+        echo "Running smoke tests on ${{ steps.deploy.outputs.alb_dns }}"
+        for i in {1..30}; do
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://${{ steps.deploy.outputs.alb_dns }}/health || echo "000")
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✓ API is healthy"
+            exit 0
+          fi
+          echo "Attempt $i: HTTP $HTTP_CODE"
+          sleep 10
+        done
+        echo "✗ API failed to become healthy"
+        exit 1
+
+    - name: Deployment notification
+      if: always()
+      run: |
+        echo "Deployment to dev completed"
+        echo "ALB: ${{ steps.deploy.outputs.alb_dns }}"
+        echo "Status: ${{ job.status }}"
+
+  deploy-staging:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging'
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://staging.ai-voice-sms.com
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+
+    - name: Set up Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+        terraform_version: 1.6.0
+
+    - name: Terraform Init
+      run: |
+        cd infrastructure/terraform/aws
+        terraform init
+
+    - name: Terraform Plan
+      run: |
+        cd infrastructure/terraform/aws
+        terraform plan -var-file="environments/staging-optimized.tfvars" -out=tfplan
+
+    - name: Terraform Apply
+      run: |
+        cd infrastructure/terraform/aws
+        terraform apply -auto-approve tfplan
+
+    - name: Get outputs
+      id: deploy
+      run: |
+        cd infrastructure/terraform/aws
+        echo "alb_dns=$(terraform output -raw alb_dns_name 2>/dev/null || echo 'pending')" >> $GITHUB_OUTPUT
+
+    - name: Smoke tests
+      run: |
+        echo "Running smoke tests on ${{ steps.deploy.outputs.alb_dns }}"
+        for i in {1..30}; do
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://${{ steps.deploy.outputs.alb_dns }}/health || echo "000")
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✓ API is healthy"
+            exit 0
+          fi
+          echo "Attempt $i: HTTP $HTTP_CODE"
+          sleep 10
+        done
+        echo "✗ API failed to become healthy"
+        exit 1
+
+    - name: Deployment notification
+      if: always()
+      run: echo "Staging deployment completed with status: ${{ job.status }}"
