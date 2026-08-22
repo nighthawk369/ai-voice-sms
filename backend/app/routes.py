@@ -26,8 +26,9 @@ from app.schemas import (
 )
 from app.security import (
     hash_password, verify_password, create_access_token, create_refresh_token,
-    get_token_user_id, get_token_org_id
+    get_token_user_id, get_token_org_id, generate_api_key, hash_token
 )
+from app.dependencies import get_admin_user
 from app.dependencies import get_current_user, get_current_org_id
 from app.config import get_settings
 import logging
@@ -533,19 +534,18 @@ async def list_workflows(
 # API KEYS ENDPOINTS
 # ============================================================================
 
-@router.post("/api-keys", response_model=APIKeyRead, tags=["API Keys"])
+@router.post("/api-keys", tags=["API Keys"])
 async def create_api_key(
     key_data: APIKeyCreate,
     org_id: UUID = Depends(get_current_org_id),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Create API key"""
+    """Create API key - returns the key value once (save it securely)"""
     if user.role not in ["OWNER", "ADMIN"]:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    key_value = f"sk-{uuid4()}"
-    key_hash = hash_password(key_value)
+    key_value, key_hash = generate_api_key()
 
     api_key = APIKey(
         organization_id=org_id,
@@ -556,7 +556,16 @@ async def create_api_key(
     await db.commit()
     await db.refresh(api_key)
 
-    return APIKeyRead.model_validate(api_key)
+    # Return the actual key value (only shown once)
+    return {
+        "id": str(api_key.id),
+        "name": api_key.name,
+        "key": key_value,
+        "scopes": api_key.scopes,
+        "is_active": api_key.is_active,
+        "created_at": api_key.created_at,
+        "warning": "Save this key securely. You won't be able to see it again."
+    }
 
 
 @router.get("/api-keys", response_model=List[APIKeyRead], tags=["API Keys"])
@@ -573,3 +582,332 @@ async def list_api_keys(
         select(APIKey).where(APIKey.organization_id == org_id)
     )
     return [APIKeyRead.model_validate(k) for k in result.scalars().all()]
+
+
+@router.delete("/api-keys/{key_id}", status_code=204, tags=["API Keys"])
+async def delete_api_key(
+    key_id: UUID,
+    org_id: UUID = Depends(get_current_org_id),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Delete API key"""
+    if user.role not in ["OWNER", "ADMIN"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    result = await db.execute(
+        select(APIKey).where(
+            and_(APIKey.id == key_id, APIKey.organization_id == org_id)
+        )
+    )
+    key = result.scalar_one_or_none()
+    if not key:
+        raise HTTPException(status_code=404, detail="API key not found")
+
+    await db.delete(key)
+    await db.commit()
+
+
+# ============================================================================
+# USER MANAGEMENT ENDPOINTS
+# ============================================================================
+
+@router.get("/users/me", response_model=UserRead, tags=["Users"])
+async def get_current_user_info(
+    user: User = Depends(get_current_user)
+):
+    """Get current authenticated user"""
+    return UserRead.model_validate(user)
+
+
+@router.post("/users", response_model=UserRead, tags=["Users"])
+async def create_user(
+    user_data: UserCreate,
+    org_id: UUID = Depends(get_current_org_id),
+    admin: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Create new user in organization (admin only)"""
+    # Check if user already exists
+    result = await db.execute(
+        select(User).where(
+            and_(User.email == user_data.email, User.organization_id == org_id)
+        )
+    )
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="User already exists in organization")
+
+    user = User(
+        organization_id=org_id,
+        email=user_data.email,
+        password_hash=hash_password(user_data.password),
+        first_name=user_data.first_name,
+        last_name=user_data.last_name,
+        role="AGENT"
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return UserRead.model_validate(user)
+
+
+@router.get("/users", response_model=List[UserRead], tags=["Users"])
+async def list_users(
+    org_id: UUID = Depends(get_current_org_id),
+    user: User = Depends(get_current_user),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db)
+):
+    """List all users in organization"""
+    result = await db.execute(
+        select(User)
+        .where(User.organization_id == org_id)
+        .offset(skip)
+        .limit(limit)
+    )
+    return [UserRead.model_validate(u) for u in result.scalars().all()]
+
+
+@router.put("/users/{user_id}/role", tags=["Users"])
+async def update_user_role(
+    user_id: UUID,
+    role: str,
+    org_id: UUID = Depends(get_current_org_id),
+    admin: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Update user role (admin only)"""
+    # Validate role
+    valid_roles = ["OWNER", "ADMIN", "MANAGER", "AGENT", "VIEWER"]
+    if role not in valid_roles:
+        raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {', '.join(valid_roles)}")
+
+    result = await db.execute(
+        select(User).where(
+            and_(User.id == user_id, User.organization_id == org_id)
+        )
+    )
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.role = role
+    await db.commit()
+    return {"message": f"User role updated to {role}"}
+
+
+@router.put("/users/{user_id}/deactivate", tags=["Users"])
+async def deactivate_user(
+    user_id: UUID,
+    org_id: UUID = Depends(get_current_org_id),
+    admin: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Deactivate user account"""
+    result = await db.execute(
+        select(User).where(
+            and_(User.id == user_id, User.organization_id == org_id)
+        )
+    )
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Prevent deactivating the only owner
+    if user.role == "OWNER":
+        owner_count = await db.execute(
+            select(func.count(User.id)).where(
+                and_(
+                    User.organization_id == org_id,
+                    User.role == "OWNER",
+                    User.is_active == True
+                )
+            )
+        )
+        if owner_count.scalar() <= 1:
+            raise HTTPException(status_code=400, detail="Cannot deactivate the last owner")
+
+    user.is_active = False
+    await db.commit()
+    return {"message": "User deactivated"}
+
+
+# ============================================================================
+# TASKS/TO-DOS ENDPOINTS
+# ============================================================================
+
+@router.post("/tasks", response_model=dict, tags=["Tasks"])
+async def create_task(
+    task_data: dict,
+    org_id: UUID = Depends(get_current_org_id),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Create a new task"""
+    from app.models import Task
+
+    task = Task(
+        organization_id=org_id,
+        created_by=user.id,
+        **task_data
+    )
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+    return {"id": str(task.id), "status": "created"}
+
+
+@router.get("/contacts/{contact_id}/tasks", tags=["Tasks"])
+async def list_contact_tasks(
+    contact_id: UUID,
+    org_id: UUID = Depends(get_current_org_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """List tasks for a contact"""
+    from app.models import Task
+
+    result = await db.execute(
+        select(Task).where(
+            and_(
+                Task.contact_id == contact_id,
+                Task.organization_id == org_id
+            )
+        )
+        .order_by(Task.due_date)
+    )
+    tasks = result.scalars().all()
+    return [
+        {
+            "id": str(t.id),
+            "title": t.title,
+            "status": t.status,
+            "priority": t.priority,
+            "due_date": t.due_date,
+            "created_at": t.created_at
+        }
+        for t in tasks
+    ]
+
+
+# ============================================================================
+# CUSTOM FIELDS ENDPOINTS
+# ============================================================================
+
+@router.post("/custom-fields", tags=["Custom Fields"])
+async def create_custom_field(
+    field_data: dict,
+    org_id: UUID = Depends(get_current_org_id),
+    admin: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Create custom field definition"""
+    from app.models import CustomField
+
+    custom_field = CustomField(
+        organization_id=org_id,
+        **field_data
+    )
+    db.add(custom_field)
+    await db.commit()
+    await db.refresh(custom_field)
+    return {
+        "id": str(custom_field.id),
+        "field_name": custom_field.field_name,
+        "object_type": custom_field.object_type,
+        "created_at": custom_field.created_at
+    }
+
+
+@router.get("/custom-fields", tags=["Custom Fields"])
+async def list_custom_fields(
+    org_id: UUID = Depends(get_current_org_id),
+    object_type: str = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    """List custom fields"""
+    from app.models import CustomField
+
+    query = select(CustomField).where(CustomField.organization_id == org_id)
+    if object_type:
+        query = query.where(CustomField.object_type == object_type)
+
+    result = await db.execute(query)
+    fields = result.scalars().all()
+    return [
+        {
+            "id": str(f.id),
+            "field_name": f.field_name,
+            "field_label": f.field_label,
+            "object_type": f.object_type,
+            "field_type": f.field_type,
+            "is_required": f.is_required
+        }
+        for f in fields
+    ]
+
+
+# ============================================================================
+# KNOWLEDGE BASE ENDPOINTS
+# ============================================================================
+
+@router.post("/knowledge-base", tags=["Knowledge Base"])
+async def create_kb_item(
+    item_data: dict,
+    org_id: UUID = Depends(get_current_org_id),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Create knowledge base item"""
+    from app.models import KnowledgeBaseItem
+
+    kb_item = KnowledgeBaseItem(
+        organization_id=org_id,
+        created_by=user.id,
+        **item_data
+    )
+    db.add(kb_item)
+    await db.commit()
+    await db.refresh(kb_item)
+    return {
+        "id": str(kb_item.id),
+        "title": kb_item.title,
+        "created_at": kb_item.created_at
+    }
+
+
+@router.get("/knowledge-base", tags=["Knowledge Base"])
+async def list_kb_items(
+    org_id: UUID = Depends(get_current_org_id),
+    category: str = Query(None),
+    published_only: bool = Query(True),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db)
+):
+    """List knowledge base items"""
+    from app.models import KnowledgeBaseItem
+
+    query = select(KnowledgeBaseItem).where(KnowledgeBaseItem.organization_id == org_id)
+
+    if published_only:
+        query = query.where(KnowledgeBaseItem.is_published == True)
+
+    if category:
+        query = query.where(KnowledgeBaseItem.category == category)
+
+    query = query.offset(skip).limit(limit).order_by(KnowledgeBaseItem.order)
+
+    result = await db.execute(query)
+    items = result.scalars().all()
+    return [
+        {
+            "id": str(item.id),
+            "title": item.title,
+            "category": item.category,
+            "is_published": item.is_published,
+            "order": item.order,
+            "created_at": item.created_at
+        }
+        for item in items
+    ]
