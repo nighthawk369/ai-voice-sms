@@ -17,8 +17,8 @@ export default function DashboardPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <p className="text-gray-500">Loading...</p>
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
       </div>
     );
   }
@@ -28,72 +28,149 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      {/* Navigation */}
-      <nav className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex items-center">
-              <h1 className="text-xl font-semibold text-gray-900">AI Platform</h1>
-            </div>
-            <div className="flex items-center space-x-4">
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header className="bg-white shadow sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex justify-between items-center">
+            <h1 className="text-2xl font-bold text-gray-900">🚀 AI Platform</h1>
+            <div className="flex items-center space-x-6">
               <span className="text-sm text-gray-600">{user.email}</span>
               <button
                 onClick={logout}
-                className="text-sm font-medium text-gray-700 hover:text-gray-900"
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition"
               >
                 Logout
               </button>
             </div>
           </div>
         </div>
-      </nav>
+      </header>
 
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-        <div className="px-4 py-6 sm:px-0">
-          <div className="border-4 border-dashed border-gray-200 rounded-lg h-96 p-4">
-            <div className="space-y-4">
-              <h2 className="text-2xl font-bold text-gray-900">Welcome, {user.first_name || user.email}!</h2>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        <div className="mb-12">
+          <h2 className="text-3xl font-bold text-gray-900 mb-2">
+            Welcome, {user.first_name || 'User'}! 👋
+          </h2>
+          <p className="text-gray-600">Manage your CRM, AI conversations, and integrations</p>
+        </div>
 
-              <p className="text-gray-600">
-                You're successfully logged into the AI Platform. This is the dashboard home page.
+        {/* Quick Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
+          <StatCard title="Contacts" value="0" icon="👥" href="/dashboard/crm/contacts" />
+          <StatCard title="Companies" value="0" icon="🏢" href="/dashboard/crm/companies" />
+          <StatCard title="Deals" value="0" icon="💼" href="/dashboard/crm/deals" />
+          <StatCard title="Calls" value="0" icon="📞" href="/dashboard/conversations" />
+        </div>
+
+        {/* CRM Section */}
+        <div className="mb-12">
+          <h3 className="text-2xl font-bold text-gray-900 mb-6">CRM Management</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <NavigationCard
+              href="/dashboard/crm/contacts"
+              title="👥 Contacts"
+              description="Manage customers and leads"
+            />
+            <NavigationCard
+              href="/dashboard/crm/companies"
+              title="🏢 Companies"
+              description="Track accounts and organizations"
+            />
+            <NavigationCard
+              href="/dashboard/crm/deals"
+              title="💼 Deals"
+              description="Manage sales opportunities"
+            />
+            <NavigationCard
+              href="/dashboard/crm/activities"
+              title="📅 Activities"
+              description="Call logs, emails, meetings"
+            />
+            <NavigationCard
+              href="/dashboard/workflows"
+              title="⚙️ Workflows"
+              description="Automate business processes"
+            />
+            <NavigationCard
+              href="/dashboard/conversations"
+              title="🎙️ Conversations"
+              description="AI voice and SMS logs"
+            />
+          </div>
+        </div>
+
+        {/* Integration Section */}
+        <div className="mb-12">
+          <h3 className="text-2xl font-bold text-gray-900 mb-6">Integrations</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <NavigationCard
+              href="/dashboard/integrations"
+              title="🔗 Integrations"
+              description="Connect external services"
+            />
+            <NavigationCard
+              href="/dashboard/settings"
+              title="⚙️ Settings"
+              description="Account & organization settings"
+            />
+            <NavigationCard
+              href="/dashboard/admin"
+              title="👨‍💼 Admin"
+              description="Admin controls and users"
+            />
+          </div>
+        </div>
+
+        {/* User Info Card */}
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Your Account</h3>
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <p className="text-gray-600">Name</p>
+              <p className="font-medium text-gray-900">
+                {user.first_name || 'User'} {user.last_name || ''}
               </p>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4">
-                <div className="bg-white p-4 rounded-lg shadow">
-                  <h3 className="font-semibold text-gray-900 mb-2">Quick Links</h3>
-                  <ul className="space-y-2">
-                    <li>
-                      <Link href="/dashboard/settings" className="text-blue-600 hover:text-blue-500">
-                        → Settings
-                      </Link>
-                    </li>
-                    <li>
-                      <Link href="/dashboard/admin" className="text-blue-600 hover:text-blue-500">
-                        → Admin Panel
-                      </Link>
-                    </li>
-                  </ul>
-                </div>
-
-                <div className="bg-white p-4 rounded-lg shadow">
-                  <h3 className="font-semibold text-gray-900 mb-2">Account Info</h3>
-                  <div className="text-sm text-gray-600 space-y-1">
-                    <p>Role: <span className="font-medium">{user.role}</span></p>
-                    <p>Email: <span className="font-medium">{user.email}</span></p>
-                    <p>Status: <span className="font-medium">{user.is_active ? 'Active' : 'Inactive'}</span></p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-4 text-sm text-gray-500">
-                📖 See <span className="font-mono">MASTER_SPECIFICATION.md</span> for complete documentation.
-              </div>
+            </div>
+            <div>
+              <p className="text-gray-600">Email</p>
+              <p className="font-medium text-gray-900">{user.email}</p>
+            </div>
+            <div>
+              <p className="text-gray-600">Role</p>
+              <p className="font-medium text-gray-900">{user.role}</p>
+            </div>
+            <div>
+              <p className="text-gray-600">Status</p>
+              <p className="font-medium text-green-600">{user.is_active ? 'Active' : 'Inactive'}</p>
             </div>
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+function StatCard({ title, value, icon, href }: any) {
+  return (
+    <Link href={href}>
+      <div className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition cursor-pointer">
+        <div className="text-3xl mb-3">{icon}</div>
+        <p className="text-gray-600 text-sm mb-1">{title}</p>
+        <p className="text-3xl font-bold text-gray-900">{value}</p>
+      </div>
+    </Link>
+  );
+}
+
+function NavigationCard({ href, title, description }: any) {
+  return (
+    <Link href={href}>
+      <div className="bg-white rounded-lg shadow p-6 hover:shadow-lg hover:scale-105 transition cursor-pointer">
+        <h4 className="text-lg font-semibold text-gray-900 mb-2">{title}</h4>
+        <p className="text-gray-600 text-sm">{description}</p>
+      </div>
+    </Link>
   );
 }

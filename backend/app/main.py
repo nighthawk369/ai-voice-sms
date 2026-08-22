@@ -39,10 +39,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Add middleware in reverse order (bottom to top execution)
+from app.middleware import ErrorHandlingMiddleware, LoggingMiddleware, RequestIDMiddleware, TenantIsolationMiddleware
+
+app.add_middleware(ErrorHandlingMiddleware)
+app.add_middleware(LoggingMiddleware)
+app.add_middleware(TenantIsolationMiddleware)
+app.add_middleware(RequestIDMiddleware)
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:8081"],
+    allow_origins=["http://localhost:3000", "http://localhost:8081", "http://localhost:8000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
