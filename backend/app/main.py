@@ -9,6 +9,7 @@ import logging
 from app.config import get_settings
 from app.routes import router
 from app.routes_enhanced import router_enhanced
+from app.routes_orchestrator import router as router_orchestrator
 from app.db import init_db
 
 settings = get_settings()
@@ -62,6 +63,7 @@ app.add_middleware(
 # Include routes
 app.include_router(router, prefix="/api/v1")
 app.include_router(router_enhanced, prefix="/api/v1")
+app.include_router(router_orchestrator)
 
 
 # Root endpoint
