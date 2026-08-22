@@ -1,0 +1,17 @@
+apiVersion: v2
+name: ai-platform
+description: A Helm chart for AI Platform multi-tenant SaaS
+type: application
+version: 1.0.0
+appVersion: 1.0.0
+keywords:
+  - ai
+  - platform
+  - saas
+  - kubernetes
+home: https://github.com/yourusername/ai-platform
+sources:
+  - https://github.com/yourusername/ai-platform
+maintainers:
+  - name: Your Name
+    email: your.email@example.com

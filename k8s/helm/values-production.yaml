@@ -1,0 +1,183 @@
+# Production Environment Values
+
+environment: production
+namespace: ai-platform-production
+
+# API Configuration
+api:
+  replicaCount: 5
+  image:
+    repository: gcr.io/PROJECT_ID/ai-platform-api
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 5
+    maxReplicas: 50
+    targetCPUUtilizationPercentage: 50
+    targetMemoryUtilizationPercentage: 70
+
+  livenessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 2
+
+# Web Configuration
+web:
+  replicaCount: 5
+  image:
+    repository: gcr.io/PROJECT_ID/ai-platform-web
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 5
+    maxReplicas: 30
+    targetCPUUtilizationPercentage: 60
+    targetMemoryUtilizationPercentage: 75
+
+# Database Configuration
+postgres:
+  enabled: true
+  replicas: 1
+  resources:
+    requests:
+      cpu: 2000m
+      memory: 2Gi
+    limits:
+      cpu: 4000m
+      memory: 4Gi
+
+  storage:
+    size: 200Gi
+    storageClass: pd-ssd
+
+  backup:
+    enabled: true
+    schedule: "0 2 * * *"  # 2 AM daily
+    retention: 30
+
+# Redis Configuration
+redis:
+  enabled: true
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+# Ingress Configuration
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rate-limit: "10000"
+    nginx.ingress.kubernetes.io/cors-allow-origin: https://example.com
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+    nginx.ingress.kubernetes.io/enable-modsecurity: "true"
+    nginx.ingress.kubernetes.io/enable-owasp-core-rules: "true"
+  hosts:
+    - host: api.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+    - host: example.com
+      paths:
+        - path: /
+          pathType: Prefix
+    - host: www.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: ai-platform-tls-prod
+      hosts:
+        - example.com
+        - www.example.com
+        - api.example.com
+
+# Monitoring
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+    retention: 30d
+  alerting:
+    enabled: true
+  logging:
+    enabled: true
+
+# Network Policy
+networkPolicy:
+  enabled: true
+  policyTypes:
+    - Ingress
+    - Egress
+
+# Pod Disruption Budgets
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+# Resource Quotas
+resourceQuota:
+  enabled: true
+  cpu: 16
+  memory: 32Gi
+
+# Service Accounts
+serviceAccounts:
+  api:
+    create: true
+    name: api-service-account
+  web:
+    create: true
+    name: web-service-account
+
+# Secrets (use External Secrets Operator in production)
+secrets:
+  ENVIRONMENT: production
+  DATABASE_HOST: postgres.ai-platform-production.svc.cluster.local
+  REDIS_URL: redis://redis-service.ai-platform-production.svc.cluster.local:6379/0
+  API_URL: https://api.example.com
+  LOG_LEVEL: warning
+  ENABLE_METRICS: "true"
+  ENABLE_TRACING: "true"
+
+# Pod Priority Classes
+priorityClassName: high-priority
+
+# Security Context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000

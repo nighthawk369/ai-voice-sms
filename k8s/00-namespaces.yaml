@@ -1,0 +1,129 @@
+---
+# Development Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ai-platform-dev
+  labels:
+    environment: dev
+    managed-by: terraform-helm
+  annotations:
+    description: "Development environment for AI Platform"
+
+---
+# Staging Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ai-platform-staging
+  labels:
+    environment: staging
+    managed-by: terraform-helm
+  annotations:
+    description: "Staging environment for AI Platform"
+
+---
+# Production Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ai-platform-production
+  labels:
+    environment: production
+    managed-by: terraform-helm
+  annotations:
+    description: "Production environment for AI Platform"
+
+---
+# Resource Quotas for Development (Conservative)
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: ai-platform-dev-quota
+  namespace: ai-platform-dev
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: "8Gi"
+    limits.cpu: "8"
+    limits.memory: "16Gi"
+    pods: "20"
+    services: "10"
+    ingresses.networking.k8s.io: "5"
+  scopes:
+    - NotTerminating
+
+---
+# Resource Quotas for Staging (Moderate)
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: ai-platform-staging-quota
+  namespace: ai-platform-staging
+spec:
+  hard:
+    requests.cpu: "8"
+    requests.memory: "16Gi"
+    limits.cpu: "16"
+    limits.memory: "32Gi"
+    pods: "50"
+    services: "20"
+    ingresses.networking.k8s.io: "10"
+  scopes:
+    - NotTerminating
+
+---
+# Resource Quotas for Production (Generous)
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: ai-platform-production-quota
+  namespace: ai-platform-production
+spec:
+  hard:
+    requests.cpu: "16"
+    requests.memory: "32Gi"
+    limits.cpu: "32"
+    limits.memory: "64Gi"
+    pods: "100"
+    services: "30"
+    ingresses.networking.k8s.io: "15"
+  scopes:
+    - NotTerminating
+
+---
+# Network Policy - Deny all by default
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-all-dev
+  namespace: ai-platform-dev
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-all-staging
+  namespace: ai-platform-staging
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-all-production
+  namespace: ai-platform-production
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress

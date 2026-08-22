@@ -1,0 +1,333 @@
+---
+# API Service Account
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: api-service-account
+  namespace: ai-platform-dev
+  labels:
+    app: api
+    environment: dev
+
+---
+# API Deployment with Optimized Resources
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: ai-platform-dev
+  labels:
+    app: api
+    component: backend
+    version: v1
+    environment: dev
+  annotations:
+    deployment.kubernetes.io/revision: "1"
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: api
+      environment: dev
+  template:
+    metadata:
+      labels:
+        app: api
+        component: backend
+        environment: dev
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: api-service-account
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+
+      # Pod disruption budget for high availability
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - api
+              topologyKey: kubernetes.io/hostname
+
+      # Init containers for migrations
+      initContainers:
+      - name: db-migrate
+        image: gcr.io/PROJECT_ID/ai-platform-api:latest
+        imagePullPolicy: IfNotPresent
+        command:
+        - /bin/sh
+        - -c
+        - alembic upgrade head
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: ai-platform-secrets
+              key: DATABASE_URL
+        - name: ENVIRONMENT
+          value: "dev"
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+
+      containers:
+      - name: api
+        image: gcr.io/PROJECT_ID/ai-platform-api:latest
+        imagePullPolicy: IfNotPresent
+
+        # Container security context
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+
+        # Ports
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+        - name: metrics
+          containerPort: 8001
+          protocol: TCP
+
+        # Environment variables from ConfigMap and Secrets
+        env:
+        - name: ENVIRONMENT
+          valueFrom:
+            configMapKeyRef:
+              name: ai-platform-config
+              key: ENVIRONMENT
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: ai-platform-secrets
+              key: DATABASE_URL
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: ai-platform-config
+              key: REDIS_URL
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: ai-platform-secrets
+              key: JWT_SECRET
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ai-platform-secrets
+              key: OPENAI_API_KEY
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ai-platform-secrets
+              key: ANTHROPIC_API_KEY
+        - name: GOOGLE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ai-platform-secrets
+              key: GOOGLE_API_KEY
+        - name: PORT
+          value: "8000"
+        - name: WORKERS
+          value: "4"
+        - name: LOG_LEVEL
+          value: "info"
+
+        # Resource requests and limits (optimized for cost)
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+
+        # Liveness probe
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+
+        # Readiness probe
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 2
+
+        # Startup probe
+        startupProbe:
+          httpGet:
+            path: /health/live
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 10
+
+        # Volume mounts
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: var-run
+          mountPath: /var/run
+
+      # Volumes
+      volumes:
+      - name: tmp
+        emptyDir:
+          sizeLimit: 1Gi
+      - name: var-run
+        emptyDir:
+          sizeLimit: 512Mi
+
+      # Termination grace period
+      terminationGracePeriodSeconds: 30
+
+      # DNS policy
+      dnsPolicy: ClusterFirst
+
+---
+# API Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-service
+  namespace: ai-platform-dev
+  labels:
+    app: api
+    component: backend
+    environment: dev
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+spec:
+  type: ClusterIP
+  selector:
+    app: api
+    environment: dev
+  ports:
+  - name: http
+    port: 8000
+    targetPort: http
+    protocol: TCP
+  - name: metrics
+    port: 8001
+    targetPort: metrics
+    protocol: TCP
+  sessionAffinity: None
+
+---
+# Horizontal Pod Autoscaler for API
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-hpa
+  namespace: ai-platform-dev
+  labels:
+    app: api
+    environment: dev
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  # CPU-based scaling (50% target utilization)
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 50
+  # Memory-based scaling (70% target utilization)
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 70
+  # Custom metric: requests per second (100 RPS per pod)
+  - type: Pods
+    pods:
+      metric:
+        name: http_requests_per_second
+      target:
+        type: AverageValue
+        averageValue: "100"
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+      selectPolicy: Min
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 30
+      - type: Pods
+        value: 2
+        periodSeconds: 30
+      selectPolicy: Max
+
+---
+# Pod Disruption Budget
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api-pdb
+  namespace: ai-platform-dev
+  labels:
+    app: api
+    environment: dev
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: api
+      environment: dev

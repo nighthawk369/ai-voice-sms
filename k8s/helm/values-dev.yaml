@@ -1,0 +1,144 @@
+# Development Environment Values
+
+environment: development
+namespace: ai-platform-dev
+
+# API Configuration
+api:
+  replicaCount: 2
+  image:
+    repository: gcr.io/PROJECT_ID/ai-platform-api
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 50
+    targetMemoryUtilizationPercentage: 70
+
+  livenessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 2
+
+# Web Configuration
+web:
+  replicaCount: 2
+  image:
+    repository: gcr.io/PROJECT_ID/ai-platform-web
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 60
+    targetMemoryUtilizationPercentage: 75
+
+# Database Configuration
+postgres:
+  enabled: true
+  replicas: 1
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  storage:
+    size: 20Gi
+    storageClass: standard
+
+# Redis Configuration
+redis:
+  enabled: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+# Ingress Configuration
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-staging
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+  hosts:
+    - host: localhost
+      paths:
+        - path: /api
+          pathType: Prefix
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Monitoring
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+    retention: 7d
+  alerting:
+    enabled: true
+
+# Network Policy
+networkPolicy:
+  enabled: true
+  policyTypes:
+    - Ingress
+    - Egress
+
+# Resource Quotas
+resourceQuota:
+  enabled: true
+  cpu: 4
+  memory: 8Gi
+
+# Service Accounts
+serviceAccounts:
+  api:
+    create: true
+    name: api-service-account
+  web:
+    create: true
+    name: web-service-account
+
+# Secrets (base64 encoded - use external secrets in production)
+secrets:
+  ENVIRONMENT: development
+  DATABASE_HOST: postgres.ai-platform-dev.svc.cluster.local
+  REDIS_URL: redis://redis-service.ai-platform-dev.svc.cluster.local:6379/0
+  API_URL: http://api-service.ai-platform-dev.svc.cluster.local:8000

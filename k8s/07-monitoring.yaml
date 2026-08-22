@@ -1,0 +1,318 @@
+---
+# Prometheus ConfigMap for Development
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: ai-platform-dev
+  labels:
+    app: prometheus
+    environment: dev
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+      external_labels:
+        cluster: 'kubernetes'
+        environment: 'dev'
+
+    scrape_configs:
+    - job_name: 'kubernetes-apiservers'
+      kubernetes_sd_configs:
+      - role: endpoints
+      scheme: https
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+        action: keep
+        regex: default;kubernetes;https
+
+    - job_name: 'kubernetes-pods'
+      kubernetes_sd_configs:
+      - role: pod
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+      - action: labelmap
+        regex: __meta_kubernetes_pod_label_(.+)
+      - source_labels: [__meta_kubernetes_namespace]
+        action: replace
+        target_label: kubernetes_namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        action: replace
+        target_label: kubernetes_pod_name
+
+---
+# Prometheus Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: ai-platform-dev
+  labels:
+    app: prometheus
+    environment: dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+      environment: dev
+  template:
+    metadata:
+      labels:
+        app: prometheus
+        environment: dev
+    spec:
+      serviceAccountName: prometheus
+      containers:
+      - name: prometheus
+        image: prom/prometheus:v2.45.0
+        imagePullPolicy: IfNotPresent
+        args:
+          - '--config.file=/etc/prometheus/prometheus.yml'
+          - '--storage.tsdb.path=/prometheus'
+          - '--storage.tsdb.retention.time=7d'
+          - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+          - '--web.console.templates=/usr/share/prometheus/consoles'
+
+        ports:
+        - name: web
+          containerPort: 9090
+          protocol: TCP
+
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "250m"
+            memory: "512Mi"
+
+        volumeMounts:
+        - name: prometheus-config
+          mountPath: /etc/prometheus
+        - name: prometheus-storage
+          mountPath: /prometheus
+
+      volumes:
+      - name: prometheus-config
+        configMap:
+          name: prometheus-config
+      - name: prometheus-storage
+        emptyDir:
+          sizeLimit: 2Gi
+
+---
+# Prometheus ServiceAccount
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: ai-platform-dev
+
+---
+# Prometheus ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus
+spec:
+  rules:
+  - apiGroups: [""]
+    resources:
+    - nodes
+    - nodes/proxy
+    - services
+    - endpoints
+    - pods
+    verbs: ["get", "list", "watch"]
+  - apiGroups:
+    - extensions
+    resources:
+    - ingresses
+    verbs: ["get", "list", "watch"]
+
+---
+# Prometheus ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus
+subjects:
+- kind: ServiceAccount
+  name: prometheus
+  namespace: ai-platform-dev
+
+---
+# Prometheus Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-service
+  namespace: ai-platform-dev
+  labels:
+    app: prometheus
+    environment: dev
+spec:
+  type: ClusterIP
+  selector:
+    app: prometheus
+    environment: dev
+  ports:
+  - name: web
+    port: 9090
+    targetPort: web
+    protocol: TCP
+
+---
+# Alert Rules ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alert-rules
+  namespace: ai-platform-dev
+  labels:
+    app: prometheus
+    environment: dev
+data:
+  alert-rules.yml: |
+    groups:
+    - name: ai-platform-alerts
+      interval: 30s
+      rules:
+      # High error rate
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value }} per second"
+
+      # High latency
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, http_request_duration_seconds) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API latency detected"
+          description: "P95 latency is {{ $value }} seconds"
+
+      # Pod memory usage
+      - alert: HighMemoryUsage
+        expr: container_memory_usage_bytes / container_spec_memory_limit_bytes > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage"
+          description: "Pod {{ $labels.pod_name }} memory usage is {{ $value | humanizePercentage }}"
+
+      # Pod CPU usage
+      - alert: HighCPUUsage
+        expr: rate(container_cpu_usage_seconds_total[5m]) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage"
+          description: "Pod {{ $labels.pod_name }} CPU usage is {{ $value | humanizePercentage }}"
+
+      # Pod restart count
+      - alert: PodRestarting
+        expr: rate(kube_pod_container_status_restarts_total[15m]) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Pod restarting frequently"
+          description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is restarting"
+
+      # API unavailable
+      - alert: APIUnavailable
+        expr: up{job="kubernetes-pods", app="api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API service is down"
+          description: "API pod {{ $labels.kubernetes_pod_name }} is not responding"
+
+      # Database connection pool exhausted
+      - alert: DatabasePoolExhausted
+        expr: pg_stat_activity_count >= 90
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Database connection pool exhausted"
+          description: "{{ $value }} active connections out of 100 max"
+
+---
+# Alertmanager ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: ai-platform-dev
+  labels:
+    app: alertmanager
+    environment: dev
+data:
+  config.yml: |
+    global:
+      resolve_timeout: 5m
+
+    route:
+      receiver: 'default'
+      group_by: ['alertname', 'cluster', 'service']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 12h
+      routes:
+      - match:
+          severity: critical
+        receiver: 'critical'
+        continue: true
+      - match:
+          severity: warning
+        receiver: 'warning'
+
+    receivers:
+    - name: 'default'
+      webhook_configs:
+      - url: 'http://alerting-webhook:5000/'
+
+    - name: 'critical'
+      pagerduty_configs:
+      - service_key: 'YOUR_PAGERDUTY_KEY'
+      webhook_configs:
+      - url: 'http://alerting-webhook:5000/critical'
+
+    - name: 'warning'
+      email_configs:
+      - to: 'alerts@example.com'
+        from: 'alertmanager@example.com'
+        smarthost: 'smtp.example.com:587'
+        auth_username: 'alerts@example.com'
+        auth_password: 'password'

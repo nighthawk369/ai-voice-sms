@@ -1,0 +1,205 @@
+---
+# PostgreSQL ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-config
+  namespace: ai-platform-dev
+  labels:
+    app: postgres
+    environment: dev
+data:
+  postgresql.conf: |
+    max_connections = 100
+    shared_buffers = 256MB
+    effective_cache_size = 1GB
+    maintenance_work_mem = 64MB
+    checkpoint_completion_target = 0.9
+    wal_buffers = 16MB
+    default_statistics_target = 100
+    random_page_cost = 1.1
+    effective_io_concurrency = 200
+    work_mem = 2621kB
+    min_wal_size = 1GB
+    max_wal_size = 4GB
+
+---
+# PostgreSQL PersistentVolumeClaim
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: ai-platform-dev
+  labels:
+    app: postgres
+    environment: dev
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 20Gi
+
+---
+# PostgreSQL StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: ai-platform-dev
+  labels:
+    app: postgres
+    environment: dev
+spec:
+  serviceName: postgres-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+      environment: dev
+  template:
+    metadata:
+      labels:
+        app: postgres
+        environment: dev
+    spec:
+      securityContext:
+        fsGroup: 999
+        runAsNonRoot: true
+        runAsUser: 999
+
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - postgres
+              topologyKey: kubernetes.io/hostname
+
+      containers:
+      - name: postgres
+        image: postgres:15-alpine
+        imagePullPolicy: IfNotPresent
+
+        ports:
+        - name: postgres
+          containerPort: 5432
+          protocol: TCP
+
+        env:
+        - name: POSTGRES_DB
+          value: "ai_platform"
+        - name: POSTGRES_USER
+          value: "postgres"
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: ai-platform-secrets
+              key: POSTGRES_PASSWORD
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - exec pg_isready -U postgres
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        readinessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - exec pg_isready -U postgres
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+        - name: postgres-config
+          mountPath: /etc/postgresql
+          readOnly: true
+
+      volumes:
+      - name: postgres-config
+        configMap:
+          name: postgres-config
+
+  volumeClaimTemplates:
+  - metadata:
+      name: postgres-storage
+      labels:
+        app: postgres
+        environment: dev
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 20Gi
+
+---
+# PostgreSQL Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-service
+  namespace: ai-platform-dev
+  labels:
+    app: postgres
+    environment: dev
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app: postgres
+    environment: dev
+  ports:
+  - name: postgres
+    port: 5432
+    targetPort: postgres
+    protocol: TCP
+
+---
+# PostgreSQL Headless Service for connections
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: ai-platform-dev
+  labels:
+    app: postgres
+    environment: dev
+spec:
+  type: ClusterIP
+  selector:
+    app: postgres
+    environment: dev
+  ports:
+  - name: postgres
+    port: 5432
+    targetPort: postgres
+    protocol: TCP

@@ -1,0 +1,151 @@
+# Staging Environment Values
+
+environment: staging
+namespace: ai-platform-staging
+
+# API Configuration
+api:
+  replicaCount: 3
+  image:
+    repository: gcr.io/PROJECT_ID/ai-platform-api
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 15
+    targetCPUUtilizationPercentage: 50
+    targetMemoryUtilizationPercentage: 70
+
+  livenessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 2
+
+# Web Configuration
+web:
+  replicaCount: 3
+  image:
+    repository: gcr.io/PROJECT_ID/ai-platform-web
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 60
+    targetMemoryUtilizationPercentage: 75
+
+# Database Configuration
+postgres:
+  enabled: true
+  replicas: 1
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+  storage:
+    size: 50Gi
+    storageClass: pd-ssd
+
+# Redis Configuration
+redis:
+  enabled: true
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Ingress Configuration
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-staging
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rate-limit: "1000"
+    nginx.ingress.kubernetes.io/cors-allow-origin: https://staging.example.com
+  hosts:
+    - host: api-staging.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+    - host: staging.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: ai-platform-tls-staging
+      hosts:
+        - staging.example.com
+        - api-staging.example.com
+
+# Monitoring
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+    retention: 14d
+  alerting:
+    enabled: true
+
+# Network Policy
+networkPolicy:
+  enabled: true
+  policyTypes:
+    - Ingress
+    - Egress
+
+# Resource Quotas
+resourceQuota:
+  enabled: true
+  cpu: 8
+  memory: 16Gi
+
+# Service Accounts
+serviceAccounts:
+  api:
+    create: true
+    name: api-service-account
+  web:
+    create: true
+    name: web-service-account
+
+# Secrets
+secrets:
+  ENVIRONMENT: staging
+  DATABASE_HOST: postgres.ai-platform-staging.svc.cluster.local
+  REDIS_URL: redis://redis-service.ai-platform-staging.svc.cluster.local:6379/0
+  API_URL: https://api-staging.example.com

@@ -1,0 +1,204 @@
+---
+# Ingress for Development
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ai-platform-ingress
+  namespace: ai-platform-dev
+  labels:
+    app: ai-platform
+    environment: dev
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    cert-manager.io/cluster-issuer: "letsencrypt-staging"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+    nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
+spec:
+  rules:
+  - host: "localhost"
+    http:
+      paths:
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: api-service
+            port:
+              number: 8000
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: web-service
+            port:
+              number: 3000
+
+---
+# Ingress for Staging
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ai-platform-ingress
+  namespace: ai-platform-staging
+  labels:
+    app: ai-platform
+    environment: staging
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    cert-manager.io/cluster-issuer: "letsencrypt-staging"
+    nginx.ingress.kubernetes.io/rate-limit: "1000"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://staging.example.com"
+    nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+spec:
+  tls:
+  - hosts:
+    - "staging.example.com"
+    - "api-staging.example.com"
+    secretName: ai-platform-tls-staging
+  rules:
+  - host: "api-staging.example.com"
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: api-service
+            port:
+              number: 8000
+  - host: "staging.example.com"
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: web-service
+            port:
+              number: 3000
+
+---
+# Ingress for Production
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ai-platform-ingress
+  namespace: ai-platform-production
+  labels:
+    app: ai-platform
+    environment: production
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/rate-limit: "10000"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://example.com"
+    nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+    nginx.ingress.kubernetes.io/enable-modsecurity: "true"
+    nginx.ingress.kubernetes.io/enable-owasp-core-rules: "true"
+spec:
+  tls:
+  - hosts:
+    - "example.com"
+    - "www.example.com"
+    - "api.example.com"
+    secretName: ai-platform-tls-prod
+  rules:
+  - host: "api.example.com"
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: api-service
+            port:
+              number: 8000
+  - host: "example.com"
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: web-service
+            port:
+              number: 3000
+  - host: "www.example.com"
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: web-service
+            port:
+              number: 3000
+
+---
+# Network Policy - Allow ingress traffic
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-dev
+  namespace: ai-platform-dev
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+
+---
+# Network Policy - Allow internal traffic
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-internal-dev
+  namespace: ai-platform-dev
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector: {}
+      namespaceSelector: {}
+  egress:
+  - to:
+    - podSelector: {}
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 53
+    - protocol: UDP
+      port: 53
+
+---
+# Network Policy - Allow external DNS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: ai-platform-dev
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: UDP
+      port: 53
