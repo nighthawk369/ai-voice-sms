@@ -389,7 +389,7 @@ git push origin feature/my-feature
 
 **In GitHub:**
 ```
-https://github.com/yourusername/callsync/actions
+https://github.com/nighthawk369/callsync/actions
 → Click latest workflow run
 → Click each job for logs
 ```

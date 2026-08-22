@@ -524,7 +524,7 @@ New to the project? Do this:
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/nighthawk369/ai-voice-sms.git
+git clone https://github.com/nighthawk369/callsync.git
 cd ai-voice-sms
 
 # 2. Read documentation

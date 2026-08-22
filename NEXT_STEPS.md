@@ -6,7 +6,7 @@
 ✅ **Terraform Infrastructure** - AWS & GCP configurations with cost optimization
 ✅ **Multi-Industry Support** - 29 business types with industry-specific configurations
 ✅ **Cost Optimization** - Annual savings of $39,744-40,404 (-86-87%)
-✅ **Code Committed** - All work pushed to GitHub (https://github.com/nighthawk369/ai-voice-sms)
+✅ **Code Committed** - All work pushed to GitHub (https://github.com/nighthawk369/callsync)
 
 ---
 
