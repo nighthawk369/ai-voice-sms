@@ -8,6 +8,7 @@ import logging
 
 from app.config import get_settings
 from app.routes import router
+from app.routes_enhanced import router_enhanced
 from app.db import init_db
 
 settings = get_settings()
@@ -40,9 +41,10 @@ app = FastAPI(
 )
 
 # Add middleware in reverse order (bottom to top execution)
-from app.middleware import ErrorHandlingMiddleware, LoggingMiddleware, RequestIDMiddleware, TenantIsolationMiddleware
+from app.middleware import ErrorHandlingMiddleware, LoggingMiddleware, RequestIDMiddleware, TenantIsolationMiddleware, RateLimitMiddleware
 
 app.add_middleware(ErrorHandlingMiddleware)
+app.add_middleware(RateLimitMiddleware)
 app.add_middleware(LoggingMiddleware)
 app.add_middleware(TenantIsolationMiddleware)
 app.add_middleware(RequestIDMiddleware)
@@ -59,6 +61,7 @@ app.add_middleware(
 
 # Include routes
 app.include_router(router, prefix="/api/v1")
+app.include_router(router_enhanced, prefix="/api/v1")
 
 
 # Root endpoint

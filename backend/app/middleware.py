@@ -1,4 +1,4 @@
-"""Middleware for tenant isolation, error handling, and request logging"""
+"""Middleware for tenant isolation, error handling, request logging, and rate limiting"""
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -7,8 +7,11 @@ from uuid import uuid4
 import logging
 import time
 import json
+from app.rate_limiter import get_rate_limiter, RateLimitConfig
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
+rate_limit_config = RateLimitConfig()
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):
@@ -127,3 +130,69 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
                     "request_id": getattr(request.state, "request_id", None)
                 }
             )
+
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """Rate limiting middleware"""
+
+    # Paths exempt from rate limiting
+    EXEMPT_PATHS = {
+        "/docs", "/redoc", "/openapi.json",
+        "/health/live", "/health/ready",
+    }
+
+    async def dispatch(self, request: Request, call_next):
+        # Skip rate limiting for exempt paths
+        if any(request.url.path.startswith(path) for path in self.EXEMPT_PATHS):
+            return await call_next(request)
+
+        # Get rate limit key
+        # Try to use user_id from token, fall back to IP address
+        user_id = getattr(request.state, "user_id", None)
+        client_ip = request.client.host if request.client else "unknown"
+        rate_limit_key = str(user_id) if user_id else f"ip:{client_ip}"
+
+        # Check rate limit
+        limiter = get_rate_limiter()
+        user_role = getattr(request.state, "user_role", None)
+
+        limit = rate_limit_config.get_limit(
+            user_id=user_id,
+            user_role=user_role,
+            is_api_key=getattr(request.state, "is_api_key", False)
+        )
+
+        if not limiter.is_allowed(rate_limit_key):
+            remaining = limiter.get_remaining(rate_limit_key)
+            reset_time = limiter.get_reset_time(rate_limit_key)
+
+            logger.warning(
+                f"Rate limit exceeded for {rate_limit_key}",
+                extra={"request_id": getattr(request.state, "request_id", None)}
+            )
+
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "detail": "Rate limit exceeded",
+                    "error_code": "RATE_LIMIT_EXCEEDED",
+                    "request_id": getattr(request.state, "request_id", None),
+                    "retry_after": int((reset_time.timestamp() - datetime.now(timezone.utc).timestamp())) if reset_time else 60
+                },
+                headers={
+                    "Retry-After": str(int((reset_time.timestamp() - datetime.now(timezone.utc).timestamp())) if reset_time else 60)
+                }
+            )
+
+        response = await call_next(request)
+
+        # Add rate limit headers
+        remaining = limiter.get_remaining(rate_limit_key)
+        reset_time = limiter.get_reset_time(rate_limit_key)
+
+        response.headers["X-RateLimit-Limit"] = str(limit)
+        response.headers["X-RateLimit-Remaining"] = str(remaining)
+        if reset_time:
+            response.headers["X-RateLimit-Reset"] = str(int(reset_time.timestamp()))
+
+        return response

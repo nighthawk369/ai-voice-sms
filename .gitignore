@@ -86,3 +86,25 @@ logs/
 
 # Docker
 .dockerignore
+docker-compose.override.yml
+
+# Mobile
+.expo/
+.expo-shared/
+ios/Pods/
+android/.gradle/
+android/build/
+*.jks
+*.keystore
+
+# Misc
+.turbo/
+.cache/
+*.backup
+*.tmp
+
+# Sensitive
+.env (should be .env.example only)
+secrets.json
+*.pem
+*.key
