@@ -54,11 +54,18 @@ jobs:
     - name: Get RDS Endpoint
       id: rds
       run: |
-        cd infrastructure/terraform/aws
-        terraform init
-        terraform plan -var-file="environments/${{ github.event.inputs.environment }}-ultra-optimized.tfvars" 2>/dev/null || true
-        ENDPOINT=$(terraform output -raw rds_endpoint 2>/dev/null || echo "localhost")
+        if [ -d "infrastructure/terraform/aws" ]; then
+          cd infrastructure/terraform/aws
+          terraform init -upgrade=false 2>/dev/null || true
+          ENDPOINT=$(terraform output -raw rds_endpoint 2>/dev/null || echo "")
+        else
+          ENDPOINT=""
+        fi
+
+        # Fallback to environment variable if terraform fails
+        ENDPOINT=${ENDPOINT:-${{ secrets.DB_HOST }:-localhost}}
         echo "endpoint=$ENDPOINT" >> $GITHUB_OUTPUT
+        echo "Using endpoint: $ENDPOINT"
 
     - name: Upgrade Database
       if: github.event.inputs.action == 'upgrade'

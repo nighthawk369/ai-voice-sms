@@ -18,11 +18,11 @@ on:
 
 jobs:
   health-check:
-    name: Health Check - ${{ matrix.env }}
+    name: Health Check
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        env: ${{ fromJson('["dev", "staging", "production"]') }}
+        env: [dev, staging, production]
       fail-fast: false
 
     steps:

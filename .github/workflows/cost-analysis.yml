@@ -41,15 +41,14 @@ jobs:
         echo "Period: ${{ github.event.inputs.period || 'week' }}"
         echo ""
 
-        # Get EC2 costs
-        echo "EC2 (ECS Fargate):"
+        # Get costs for last 7 days
+        echo "Recent AWS Costs:"
         aws ce get-cost-and-usage \
           --time-period Start=$(date -d '7 days ago' +%Y-%m-%d),End=$(date +%Y-%m-%d) \
           --granularity DAILY \
-          --metrics "UnblendedCost" \
+          --metrics UnblendedCost \
           --group-by Type=DIMENSION,Key=SERVICE \
-          --filter file://cost-filter.json \
-          --output table 2>/dev/null || echo "  Unable to fetch data"
+          --output table 2>/dev/null || echo "  Unable to fetch cost data (may require Cost Explorer access)"
 
         echo ""
         echo "Services:"
