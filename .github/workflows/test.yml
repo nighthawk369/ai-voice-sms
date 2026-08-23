@@ -5,6 +5,18 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
+  workflow_dispatch:
+    inputs:
+      test_scope:
+        description: 'What to test?'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - backend-only
+          - frontend-only
+          - mobile-only
 
 jobs:
   backend-tests:

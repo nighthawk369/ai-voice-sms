@@ -1,0 +1,276 @@
+name: Infrastructure Management
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Infrastructure action'
+        required: true
+        type: choice
+        options:
+          - start
+          - stop
+          - status
+          - deploy
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - production
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  infrastructure:
+    name: Infrastructure - ${{ github.event.inputs.action }}
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Set up Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+        terraform_version: 1.6.0
+
+    # ============================================================
+    # START INFRASTRUCTURE
+    # ============================================================
+    - name: Start Infrastructure (${{ github.event.inputs.environment }})
+      if: github.event.inputs.action == 'start'
+      run: |
+        echo "🚀 Starting ${{ github.event.inputs.environment }} infrastructure..."
+        cd infrastructure/terraform/aws
+        terraform init
+
+        case "${{ github.event.inputs.environment }}" in
+          dev)
+            terraform apply -var-file="environments/dev-ultra-optimized.tfvars" -auto-approve
+            ;;
+          staging)
+            terraform apply -var-file="environments/staging-optimized.tfvars" -auto-approve
+            ;;
+          production)
+            echo "⚠️ Production deployment requires manual approval!"
+            terraform plan -var-file="environments/production-optimized.tfvars"
+            exit 1
+            ;;
+        esac
+
+        echo "✅ Infrastructure starting..."
+        sleep 20
+        echo "Waiting for resources to be ready..."
+        sleep 60
+
+        # Get outputs
+        ALB_DNS=$(terraform output -raw alb_dns_name)
+        RDS_ENDPOINT=$(terraform output -raw rds_endpoint)
+
+        echo "Infrastructure Status:"
+        echo "====================="
+        echo "ALB DNS: $ALB_DNS"
+        echo "RDS Endpoint: $RDS_ENDPOINT"
+        echo "✅ Start complete!"
+
+    # ============================================================
+    # STOP INFRASTRUCTURE
+    # ============================================================
+    - name: Stop Infrastructure (${{ github.event.inputs.environment }})
+      if: github.event.inputs.action == 'stop'
+      run: |
+        echo "⛔ Stopping ${{ github.event.inputs.environment }} infrastructure..."
+        cd infrastructure/terraform/aws
+        terraform init
+
+        case "${{ github.event.inputs.environment }}" in
+          dev)
+            terraform destroy -var-file="environments/dev-ultra-optimized.tfvars" -auto-approve
+            ;;
+          staging)
+            terraform destroy -var-file="environments/staging-optimized.tfvars" -auto-approve
+            ;;
+          production)
+            echo "❌ Cannot destroy production from GitHub!"
+            echo "To destroy production, run locally with proper safeguards"
+            exit 1
+            ;;
+        esac
+
+        echo "✅ Infrastructure destroyed"
+        echo "💰 Saving money - infrastructure is off!"
+
+    # ============================================================
+    # CHECK INFRASTRUCTURE STATUS
+    # ============================================================
+    - name: Check Infrastructure Status (${{ github.event.inputs.environment }})
+      if: github.event.inputs.action == 'status'
+      run: |
+        echo "📊 Infrastructure Status: ${{ github.event.inputs.environment }}"
+        echo "=================================================="
+        cd infrastructure/terraform/aws
+        terraform init
+
+        case "${{ github.event.inputs.environment }}" in
+          dev)
+            terraform show -json | jq '.values.root_module.resources[] | {type: .type, name: .address}' || echo "No resources"
+            ;;
+          staging)
+            terraform show -json | jq '.values.root_module.resources[] | {type: .type, name: .address}' || echo "No resources"
+            ;;
+          production)
+            terraform show -json | jq '.values.root_module.resources[] | {type: .type, name: .address}' || echo "No resources"
+            ;;
+        esac
+
+        # Try to get detailed status
+        aws ec2 describe-instances --filters "Name=tag:Environment,Values=${{ github.event.inputs.environment }}" --query 'Reservations[*].Instances[*].[InstanceId,State.Name]' --output table || echo "ECS Fargate - no EC2 instances"
+
+        # Check ECS services
+        aws ecs describe-services \
+          --cluster ai-voice-sms-${{ github.event.inputs.environment }} \
+          --services ai-voice-sms-api \
+          --query 'services[*].[serviceName,status,runningCount,desiredCount]' \
+          --output table 2>/dev/null || echo "No ECS services found"
+
+        # Check RDS
+        aws rds describe-db-instances \
+          --query 'DBInstances[?contains(DBInstanceIdentifier, `${{ github.event.inputs.environment }}`)][DBInstanceIdentifier,DBInstanceStatus]' \
+          --output table 2>/dev/null || echo "No RDS instances found"
+
+        echo ""
+        echo "✅ Status check complete"
+
+    # ============================================================
+    # DEPLOY APPLICATION
+    # ============================================================
+    - name: Deploy Application (${{ github.event.inputs.environment }})
+      if: github.event.inputs.action == 'deploy'
+      run: |
+        echo "🚀 Deploying to ${{ github.event.inputs.environment }}..."
+        cd infrastructure/terraform/aws
+        terraform init
+
+        # Verify infrastructure exists
+        STATE=$(terraform show -json | jq '.values.root_module.resources | length')
+        if [ "$STATE" -eq 0 ]; then
+          echo "❌ Infrastructure not found!"
+          echo "Run 'start' action first to create infrastructure"
+          exit 1
+        fi
+
+        # Build and push Docker image
+        echo "📦 Building Docker image..."
+        docker build -t callsync:latest -f backend/Dockerfile .
+
+        # Get AWS account ID
+        ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+        REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+        # Push to ECR
+        echo "📤 Pushing to ECR..."
+        aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $REGISTRY
+        docker tag callsync:latest ${REGISTRY}/callsync:latest
+        docker tag callsync:latest ${REGISTRY}/callsync:$(date +%Y%m%d-%H%M%S)
+        docker push ${REGISTRY}/callsync:latest
+
+        # Update ECS service
+        echo "🔄 Updating ECS service..."
+        CLUSTER_NAME="ai-voice-sms-${{ github.event.inputs.environment }}"
+        SERVICE_NAME="ai-voice-sms-api"
+
+        aws ecs update-service \
+          --cluster $CLUSTER_NAME \
+          --service $SERVICE_NAME \
+          --force-new-deployment \
+          --region $AWS_REGION
+
+        echo "⏳ Waiting for deployment..."
+        aws ecs wait services-stable \
+          --cluster $CLUSTER_NAME \
+          --services $SERVICE_NAME \
+          --region $AWS_REGION
+
+        # Run smoke tests
+        echo "🧪 Running smoke tests..."
+        ALB_DNS=$(terraform output -raw alb_dns_name)
+
+        for i in {1..30}; do
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://${ALB_DNS}/health/ready || echo "000")
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ API is healthy!"
+            echo "🎉 Deployment successful!"
+            echo "API endpoint: http://${ALB_DNS}"
+            exit 0
+          fi
+          echo "Attempt $i/30: HTTP $HTTP_CODE"
+          sleep 10
+        done
+
+        echo "❌ Deployment timeout - API not responding"
+        exit 1
+
+    # ============================================================
+    # NOTIFICATION
+    # ============================================================
+    - name: Success Notification
+      if: success()
+      run: |
+        echo ""
+        echo "✅ Action Complete: ${{ github.event.inputs.action }}"
+        echo "Environment: ${{ github.event.inputs.environment }}"
+        echo "Triggered by: ${{ github.actor }}"
+        echo "Time: $(date)"
+        echo ""
+        echo "Next steps:"
+        case "${{ github.event.inputs.action }}" in
+          start)
+            echo "1. Verify infrastructure is running"
+            echo "2. Run 'deploy' to deploy application"
+            echo "3. Check endpoint in action summary above"
+            ;;
+          stop)
+            echo "1. Infrastructure is now offline"
+            echo "2. Costs paused (save 97%)"
+            echo "3. Run 'start' when ready to use again"
+            ;;
+          status)
+            echo "1. Review infrastructure status above"
+            echo "2. Run 'start' if resources are missing"
+            echo "3. Run 'stop' if you want to save costs"
+            ;;
+          deploy)
+            echo "1. Monitor logs above for progress"
+            echo "2. Get ALB endpoint from smoke test output"
+            echo "3. Test API with curl or browser"
+            ;;
+        esac
+
+    - name: Failure Notification
+      if: failure()
+      run: |
+        echo ""
+        echo "❌ Action Failed: ${{ github.event.inputs.action }}"
+        echo "Environment: ${{ github.event.inputs.environment }}"
+        echo ""
+        echo "Check logs above for error details"
+        echo ""
+        echo "Common issues:"
+        echo "- AWS credentials not configured in GitHub Secrets"
+        echo "- Infrastructure doesn't exist (run 'start' first)"
+        echo "- Resource limits exceeded"
+        echo "- Permission denied error"
+        echo ""
+        exit 1
