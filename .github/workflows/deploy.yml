@@ -69,13 +69,15 @@ jobs:
         aws ecs update-service \
           --cluster ai-voice-sms-dev \
           --service ai-voice-sms-api \
+          --region us-east-1 \
           --force-new-deployment || true
 
     - name: Wait for deployment
       run: |
         aws ecs wait services-stable \
           --cluster ai-voice-sms-dev \
-          --services ai-voice-sms-api || true
+          --services ai-voice-sms-api \
+          --region us-east-1 || true
 
     - name: Smoke tests
       run: |

@@ -106,8 +106,10 @@ jobs:
       run: |
         TARGETS=$(aws elbv2 describe-target-health \
           --target-group-arn $(aws elbv2 describe-target-groups \
+            --region us-east-1 \
             --query "TargetGroups[0].TargetGroupArn" \
             --output text) \
+          --region us-east-1 \
           --query 'TargetHealthDescriptions[*].TargetHealth.State' \
           --output text 2>/dev/null || echo "")
 

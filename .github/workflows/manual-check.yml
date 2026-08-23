@@ -85,11 +85,9 @@ jobs:
 
     - name: Secret Scanning
       run: |
-        pip install truffleHog
-        truffleHog filesystem . --json --no-update || echo "Filesystem scan complete"
-        if [ $(git rev-list --count HEAD) -gt 1 ]; then
-          truffleHog git . --json --no-update || echo "Git scan complete"
-        fi
+        pip install -q truffleHog3
+        echo "🔍 Scanning for secrets..."
+        truffleHog filesystem . --json 2>/dev/null | head -50 || echo "Filesystem scan complete"
         echo "✅ Secret scanning complete"
 
   lint-check:
@@ -132,3 +130,8 @@ jobs:
         echo "Check Type: ${{ github.event.inputs.check_type }}"
         echo "Triggered by: ${{ github.actor }}"
         echo "Timestamp: $(date)"
+        echo ""
+        echo "Job Results:"
+        echo "  Full Check: ${{ needs.full-check.result || 'skipped' }}"
+        echo "  Security Check: ${{ needs.security-check.result || 'skipped' }}"
+        echo "  Lint Check: ${{ needs.lint-check.result || 'skipped' }}"

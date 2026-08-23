@@ -35,15 +35,26 @@ jobs:
           --cov-report=xml \
           -q || true
 
-        # Check coverage threshold
-        COVERAGE=$(grep -oP 'name="coverage"[^>]*"[^"]*\K[^"]+' htmlcov/status.json 2>/dev/null || echo "0")
-        echo "Backend Coverage: $COVERAGE%"
+        # Check coverage threshold using Python
+        python << 'COVSCRIPT'
+import json
+import sys
+try:
+  with open('.coverage.json', 'r') as f:
+    data = json.load(f)
+    total = data.get('totals', {}).get('percent_covered', 0)
+    print(f"Backend Coverage: {total:.1f}%")
+    if total < 70:
+      print("⚠️ Warning: Coverage below 70% threshold")
+    else:
+      print("✅ Coverage above threshold")
+except FileNotFoundError:
+  print("Backend Coverage: Not available (no coverage data)")
+  print("⚠️ Coverage file not found")
+except Exception as e:
+  print(f"Backend Coverage: Error reading coverage - {e}")
+COVSCRIPT
 
-        if (( $(echo "$COVERAGE < 70" | bc -l) )); then
-          echo "⚠️ Warning: Coverage below 70% threshold"
-        else
-          echo "✅ Coverage above threshold"
-        fi
 
     - name: Set up Node.js
       uses: actions/setup-node@v4

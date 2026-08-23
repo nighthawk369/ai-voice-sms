@@ -59,7 +59,7 @@ jobs:
     - name: Install dependencies
       run: |
         cd backend
-        pip install -r requirements-optimized.txt
+        pip install -r requirements.txt
         pip install pytest pytest-asyncio pytest-cov
 
     - name: Run migrations

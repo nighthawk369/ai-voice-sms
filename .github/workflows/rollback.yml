@@ -67,40 +67,81 @@ jobs:
         CLUSTER="ai-voice-sms-${{ github.event.inputs.environment }}"
         SERVICE="ai-voice-sms-api"
 
-        # Get current task definition
-        TASK_DEF=$(aws ecs describe-services \
+        # Get current task definition image
+        CURRENT_IMAGE=$(aws ecs describe-services \
           --cluster $CLUSTER \
           --services $SERVICE \
+          --region $AWS_REGION \
           --query 'services[0].taskDefinition' \
+          --output text | xargs -I {} aws ecs describe-task-definition \
+          --task-definition {} \
+          --region $AWS_REGION \
+          --query 'taskDefinition.containerDefinitions[0].image' \
           --output text)
 
-        echo "Current task def: $TASK_DEF"
+        echo "Current image: $CURRENT_IMAGE"
 
-        # Get previous image (second most recent)
         ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
         REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
-        # List recent images
-        PREVIOUS_IMAGE=$(aws ecr describe-images \
+        # Get all image tags sorted by push date
+        IMAGES=$(aws ecr describe-images \
           --repository-name callsync \
-          --query 'imageDetails | sort_by(@, &imagePushedAt)[-2].imageTags[0]' \
+          --region $AWS_REGION \
+          --query 'imageDetails | sort_by(@, &imagePushedAt)[-10:].imageTags[0]' \
           --output text)
 
-        if [ "$PREVIOUS_IMAGE" = "None" ] || [ -z "$PREVIOUS_IMAGE" ]; then
-          PREVIOUS_IMAGE="latest"
+        echo "Available images (recent 10): $IMAGES"
+
+        # Find previous image (different from current)
+        PREVIOUS_IMAGE=""
+        for img in $IMAGES; do
+          if [ "$img" != "None" ] && [ "$img" != "latest" ]; then
+            if [[ "$CURRENT_IMAGE" != *"$img"* ]]; then
+              PREVIOUS_IMAGE=$img
+              break
+            fi
+          fi
+        done
+
+        # Fallback if no previous found
+        if [ -z "$PREVIOUS_IMAGE" ]; then
+          echo "⚠️ WARNING: No previous image found, using stable tag"
+          PREVIOUS_IMAGE="stable"
         fi
 
         echo "previous_image=${REGISTRY}/callsync:${PREVIOUS_IMAGE}" >> $GITHUB_OUTPUT
-        echo "Rollback will use: $PREVIOUS_IMAGE"
+        echo "✅ Rollback will use: $PREVIOUS_IMAGE"
 
     - name: Update ECS Service (Rollback)
       run: |
         echo "⏮️ Rolling back to previous version..."
+        echo "Image: ${{ steps.previous.outputs.previous_image }}"
 
         CLUSTER="ai-voice-sms-${{ github.event.inputs.environment }}"
         SERVICE="ai-voice-sms-api"
 
-        # Update service with previous image
+        # Get current task definition
+        TASK_DEF=$(aws ecs describe-services \
+          --cluster $CLUSTER \
+          --services $SERVICE \
+          --region $AWS_REGION \
+          --query 'services[0].taskDefinition' \
+          --output text)
+
+        # Register new task definition with previous image
+        aws ecs describe-task-definition \
+          --task-definition $TASK_DEF \
+          --region $AWS_REGION \
+          --query 'taskDefinition.[family, revision, containerDefinitions, volumes, status, requiresCompatibilities, cpu, memory, networkMode, executionRoleArn]' \
+          --output json | jq \
+          ".[2][0].image |= \"${{ steps.previous.outputs.previous_image }}\"" | \
+          jq '{family: .[0], containerDefinitions: .[2], volumes: .[3], requiresCompatibilities: .[5], cpu: .[6], memory: .[7], networkMode: .[8], executionRoleArn: .[9]}' | \
+          xargs -I {} aws ecs register-task-definition \
+          --region $AWS_REGION \
+          --cli-input-json "{}" > /dev/null || true
+
+        # Update service with force new deployment
         aws ecs update-service \
           --cluster $CLUSTER \
           --service $SERVICE \

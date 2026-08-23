@@ -77,10 +77,13 @@ jobs:
         import http from 'k6/http';
         import { check, sleep } from 'k6';
 
+        const API = __ENV.API || 'http://localhost:8000';
+        const USERS = parseInt(__ENV.USERS || '100');
+
         export const options = {
           stages: [
             { duration: '10s', target: 10 },    // Ramp up
-            { duration: '30s', target: __ENV.USERS || 100 },  // Main load
+            { duration: '30s', target: USERS },  // Main load
             { duration: '10s', target: 0 },     // Ramp down
           ],
           thresholds: {
@@ -91,12 +94,12 @@ jobs:
 
         export default function () {
           // Health check
-          let res = http.get('__ENV.API/health/ready');
+          let res = http.get(API + '/health/ready');
           check(res, { 'health check ok': (r) => r.status === 200 });
           sleep(1);
 
           // Get business types
-          res = http.get('__ENV.API/api/v1/business-types');
+          res = http.get(API + '/api/v1/business-types');
           check(res, {
             'business types status': (r) => r.status === 200,
             'has types': (r) => r.body.includes('business_types'),
@@ -104,7 +107,7 @@ jobs:
           sleep(1);
 
           // Simulate login attempt
-          res = http.post('__ENV.API/api/v1/auth/login', {
+          res = http.post(API + '/api/v1/auth/login', {
             email: 'test@example.com',
             password: 'test123456',
           });
@@ -115,9 +118,7 @@ jobs:
         }
         EOF
 
-        export API="${{ steps.endpoint.outputs.endpoint }}"
-        export USERS="${{ github.event.inputs.concurrent_users }}"
-        k6 run load-test.js
+        k6 run -e API="${{ steps.endpoint.outputs.endpoint }}" -e USERS="${{ github.event.inputs.concurrent_users }}" load-test.js
 
     - name: Generate Report
       if: always()
