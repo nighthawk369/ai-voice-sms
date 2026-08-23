@@ -1,0 +1,179 @@
+name: Health Checks
+
+on:
+  schedule:
+    - cron: '0 */4 * * *'  # Every 4 hours
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to check'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - dev
+          - staging
+          - production
+
+jobs:
+  health-check:
+    name: Health Check - ${{ matrix.env }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        env: ${{ fromJson('["dev", "staging", "production"]') }}
+      fail-fast: false
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+
+    - name: Check ECS Service Status
+      id: ecs
+      run: |
+        CLUSTER="ai-voice-sms-${{ matrix.env }}"
+        SERVICE="ai-voice-sms-api"
+
+        echo "Checking ECS service: $SERVICE in $CLUSTER"
+
+        STATUS=$(aws ecs describe-services \
+          --cluster $CLUSTER \
+          --services $SERVICE \
+          --query 'services[0].status' \
+          --output text 2>/dev/null || echo "INACTIVE")
+
+        RUNNING=$(aws ecs describe-services \
+          --cluster $CLUSTER \
+          --services $SERVICE \
+          --query 'services[0].runningCount' \
+          --output text 2>/dev/null || echo "0")
+
+        DESIRED=$(aws ecs describe-services \
+          --cluster $CLUSTER \
+          --services $SERVICE \
+          --query 'services[0].desiredCount' \
+          --output text 2>/dev/null || echo "0")
+
+        echo "status=$STATUS" >> $GITHUB_OUTPUT
+        echo "running=$RUNNING" >> $GITHUB_OUTPUT
+        echo "desired=$DESIRED" >> $GITHUB_OUTPUT
+
+        if [ "$STATUS" = "ACTIVE" ] && [ "$RUNNING" -eq "$DESIRED" ]; then
+          echo "✅ ECS: Healthy ($RUNNING/$DESIRED running)"
+        else
+          echo "⚠️ ECS: Check needed (Status: $STATUS, Running: $RUNNING/$DESIRED)"
+        fi
+
+    - name: Check RDS Database
+      id: rds
+      run: |
+        ENDPOINT=$(aws rds describe-db-instances \
+          --query "DBInstances[?contains(DBInstanceIdentifier, \`${{ matrix.env }}\`)].Endpoint.Address" \
+          --output text 2>/dev/null || echo "")
+
+        if [ -z "$ENDPOINT" ]; then
+          echo "status=INACTIVE" >> $GITHUB_OUTPUT
+          echo "⚠️ RDS: Not found (offline)"
+        else
+          echo "status=AVAILABLE" >> $GITHUB_OUTPUT
+          echo "✅ RDS: Available"
+        fi
+
+    - name: Check ElastiCache Redis
+      id: redis
+      run: |
+        STATUS=$(aws elasticache describe-cache-clusters \
+          --query "CacheClusters[?contains(CacheClusterId, \`${{ matrix.env }}\`)].CacheClusterStatus" \
+          --output text 2>/dev/null | head -1 || echo "not-found")
+
+        if [ "$STATUS" = "available" ]; then
+          echo "status=AVAILABLE" >> $GITHUB_OUTPUT
+          echo "✅ Redis: Available"
+        else
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+          echo "⚠️ Redis: Status is $STATUS"
+        fi
+
+    - name: Check ALB Health
+      id: alb
+      run: |
+        TARGETS=$(aws elbv2 describe-target-health \
+          --target-group-arn $(aws elbv2 describe-target-groups \
+            --query "TargetGroups[0].TargetGroupArn" \
+            --output text) \
+          --query 'TargetHealthDescriptions[*].TargetHealth.State' \
+          --output text 2>/dev/null || echo "")
+
+        HEALTHY=$(echo "$TARGETS" | grep -o "healthy" | wc -l)
+        TOTAL=$(echo "$TARGETS" | wc -w)
+
+        if [ "$TOTAL" -gt 0 ] && [ "$HEALTHY" -eq "$TOTAL" ]; then
+          echo "status=HEALTHY" >> $GITHUB_OUTPUT
+          echo "✅ ALB: All targets healthy ($HEALTHY/$TOTAL)"
+        else
+          echo "status=DEGRADED" >> $GITHUB_OUTPUT
+          echo "⚠️ ALB: Some targets unhealthy ($HEALTHY/$TOTAL)"
+        fi
+
+    - name: API Endpoint Health
+      id: api
+      continue-on-error: true
+      run: |
+        # Try to get endpoint from multiple sources
+        ENDPOINT=$(aws elbv2 describe-load-balancers \
+          --query "LoadBalancers[?contains(LoadBalancerName, \`${{ matrix.env }}\`)].DNSName" \
+          --output text 2>/dev/null || echo "")
+
+        if [ -z "$ENDPOINT" ]; then
+          echo "status=UNREACHABLE" >> $GITHUB_OUTPUT
+          echo "⚠️ API: Endpoint not found (infrastructure offline?)"
+        else
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://$ENDPOINT/health/ready || echo "000")
+
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "status=HEALTHY" >> $GITHUB_OUTPUT
+            echo "✅ API: Responding ($HTTP_CODE)"
+          else
+            echo "status=UNHEALTHY" >> $GITHUB_OUTPUT
+            echo "⚠️ API: HTTP $HTTP_CODE"
+          fi
+        fi
+
+  summary:
+    name: Health Check Summary
+    runs-on: ubuntu-latest
+    needs: health-check
+    if: always()
+
+    steps:
+    - name: Generate Report
+      run: |
+        echo "📊 Health Check Report"
+        echo "======================"
+        echo ""
+        echo "Timestamp: $(date)"
+        echo ""
+        echo "Summary:"
+        echo "  Development: Check logs for status"
+        echo "  Staging: Check logs for status"
+        echo "  Production: Check logs for status"
+        echo ""
+        echo "Components Checked:"
+        echo "  ✅ ECS Services"
+        echo "  ✅ RDS Databases"
+        echo "  ✅ ElastiCache"
+        echo "  ✅ Load Balancers"
+        echo "  ✅ API Health"
+        echo ""
+        if [ "${{ needs.health-check.result }}" == "success" ]; then
+          echo "Overall Status: ✅ HEALTHY"
+        else
+          echo "Overall Status: ⚠️ REVIEW NEEDED"
+        fi

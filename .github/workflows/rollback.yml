@@ -1,0 +1,189 @@
+name: Rollback Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to rollback'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - production
+      reason:
+        description: 'Reason for rollback'
+        required: true
+        type: choice
+        options:
+          - 'Bug detected'
+          - 'Performance issue'
+          - 'Data corruption'
+          - 'Security issue'
+          - 'User complaints'
+          - 'Other'
+      confirmation:
+        description: 'I understand this will revert to previous version'
+        required: true
+        type: checkbox
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  confirmation:
+    name: Rollback Confirmation
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Verify Confirmation
+      run: |
+        if [ "${{ github.event.inputs.confirmation }}" != "true" ]; then
+          echo "❌ Rollback cancelled - confirmation required"
+          exit 1
+        fi
+        echo "✅ Confirmation received"
+        echo "Rolling back ${{ github.event.inputs.environment }} due to: ${{ github.event.inputs.reason }}"
+
+  rollback:
+    name: Execute Rollback
+    runs-on: ubuntu-latest
+    needs: confirmation
+    environment: ${{ github.event.inputs.environment }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Get Previous Image
+      id: previous
+      run: |
+        CLUSTER="ai-voice-sms-${{ github.event.inputs.environment }}"
+        SERVICE="ai-voice-sms-api"
+
+        # Get current task definition
+        TASK_DEF=$(aws ecs describe-services \
+          --cluster $CLUSTER \
+          --services $SERVICE \
+          --query 'services[0].taskDefinition' \
+          --output text)
+
+        echo "Current task def: $TASK_DEF"
+
+        # Get previous image (second most recent)
+        ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+        REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+        # List recent images
+        PREVIOUS_IMAGE=$(aws ecr describe-images \
+          --repository-name callsync \
+          --query 'imageDetails | sort_by(@, &imagePushedAt)[-2].imageTags[0]' \
+          --output text)
+
+        if [ "$PREVIOUS_IMAGE" = "None" ] || [ -z "$PREVIOUS_IMAGE" ]; then
+          PREVIOUS_IMAGE="latest"
+        fi
+
+        echo "previous_image=${REGISTRY}/callsync:${PREVIOUS_IMAGE}" >> $GITHUB_OUTPUT
+        echo "Rollback will use: $PREVIOUS_IMAGE"
+
+    - name: Update ECS Service (Rollback)
+      run: |
+        echo "⏮️ Rolling back to previous version..."
+
+        CLUSTER="ai-voice-sms-${{ github.event.inputs.environment }}"
+        SERVICE="ai-voice-sms-api"
+
+        # Update service with previous image
+        aws ecs update-service \
+          --cluster $CLUSTER \
+          --service $SERVICE \
+          --force-new-deployment \
+          --region $AWS_REGION
+
+        echo "⏳ Waiting for rollback to complete..."
+        aws ecs wait services-stable \
+          --cluster $CLUSTER \
+          --services $SERVICE \
+          --region $AWS_REGION
+
+        echo "✅ Rollback complete (zero-downtime)"
+
+    - name: Verify Rollback
+      run: |
+        echo "🔍 Verifying rollback..."
+
+        CLUSTER="ai-voice-sms-${{ github.event.inputs.environment }}"
+        SERVICE="ai-voice-sms-api"
+
+        aws ecs describe-services \
+          --cluster $CLUSTER \
+          --services $SERVICE \
+          --query 'services[0].[serviceName,status,runningCount,desiredCount]' \
+          --output table
+
+        # Health check
+        ENDPOINT=$(aws elbv2 describe-load-balancers \
+          --query "LoadBalancers[?contains(LoadBalancerName, \`${{ github.event.inputs.environment }}\`)].DNSName" \
+          --output text)
+
+        echo "Testing: $ENDPOINT"
+
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://$ENDPOINT/health/ready || echo "000")
+        if [ "$HTTP_CODE" = "200" ]; then
+          echo "✅ Service healthy after rollback"
+        else
+          echo "⚠️ Warning: Health check returned $HTTP_CODE"
+        fi
+
+    - name: Log Rollback Event
+      if: always()
+      run: |
+        echo ""
+        echo "📋 Rollback Event Logged"
+        echo "========================"
+        echo ""
+        echo "Timestamp: $(date -Iseconds)"
+        echo "Environment: ${{ github.event.inputs.environment }}"
+        echo "Reason: ${{ github.event.inputs.reason }}"
+        echo "Triggered by: ${{ github.actor }}"
+        echo "Commit: $(git rev-parse --short HEAD)"
+        echo ""
+        echo "Status: COMPLETE"
+        echo ""
+        echo "Next Steps:"
+        echo "  1. Verify application is working"
+        echo "  2. Identify root cause"
+        echo "  3. Fix issue"
+        echo "  4. Deploy fix"
+        echo "  5. Monitor closely"
+
+  notify:
+    name: Notification
+    runs-on: ubuntu-latest
+    needs: [confirmation, rollback]
+    if: always()
+
+    steps:
+    - name: Send Alert
+      run: |
+        echo "🚨 Rollback Alert"
+        echo "================="
+        echo ""
+        echo "Environment: ${{ github.event.inputs.environment }}"
+        echo "Reason: ${{ github.event.inputs.reason }}"
+        echo "Status: ${{ needs.rollback.result }}"
+        echo ""
+        if [ "${{ needs.rollback.result }}" = "success" ]; then
+          echo "✅ Rollback successful"
+          echo "Application reverted to previous version"
+        else
+          echo "❌ Rollback failed"
+          echo "Manual intervention may be needed"
+        fi

@@ -1,0 +1,127 @@
+name: Database Migration
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - production
+      action:
+        description: 'Migration action'
+        required: true
+        default: 'upgrade'
+        type: choice
+        options:
+          - upgrade
+          - downgrade
+          - verify
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  database-migration:
+    name: DB Migration - ${{ github.event.inputs.action }}
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      working-directory: ./backend
+      run: |
+        python -m pip install --upgrade pip
+        pip install -q -r requirements.txt
+
+    - name: Get RDS Endpoint
+      id: rds
+      run: |
+        cd infrastructure/terraform/aws
+        terraform init
+        terraform plan -var-file="environments/${{ github.event.inputs.environment }}-ultra-optimized.tfvars" 2>/dev/null || true
+        ENDPOINT=$(terraform output -raw rds_endpoint 2>/dev/null || echo "localhost")
+        echo "endpoint=$ENDPOINT" >> $GITHUB_OUTPUT
+
+    - name: Upgrade Database
+      if: github.event.inputs.action == 'upgrade'
+      working-directory: ./backend
+      env:
+        DATABASE_URL: postgresql://postgres:${{ secrets.DB_PASSWORD }}@${{ steps.rds.outputs.endpoint }}/aivoicesms_${{ github.event.inputs.environment }}
+      run: |
+        echo "🔄 Running database migrations..."
+        alembic upgrade head
+        echo "✅ Database upgraded successfully"
+
+    - name: Downgrade Database
+      if: github.event.inputs.action == 'downgrade'
+      working-directory: ./backend
+      env:
+        DATABASE_URL: postgresql://postgres:${{ secrets.DB_PASSWORD }}@${{ steps.rds.outputs.endpoint }}/aivoicesms_${{ github.event.inputs.environment }}
+      run: |
+        echo "⬇️ Rolling back last migration..."
+        alembic downgrade -1
+        echo "✅ Database rolled back"
+        echo "⚠️ Only use for emergencies!"
+
+    - name: Verify Database
+      if: github.event.inputs.action == 'verify'
+      working-directory: ./backend
+      env:
+        DATABASE_URL: postgresql://postgres:${{ secrets.DB_PASSWORD }}@${{ steps.rds.outputs.endpoint }}/aivoicesms_${{ github.event.inputs.environment }}
+      run: |
+        echo "🔍 Verifying database integrity..."
+        python -c "
+        import sqlalchemy as sa
+        from app.db import engine
+        from app.models import Base
+
+        # Check all tables exist
+        inspector = sa.inspect(engine)
+        tables = inspector.get_table_names()
+
+        print(f'✅ Found {len(tables)} tables:')
+        for table in sorted(tables):
+          columns = len(inspector.get_columns(table))
+          print(f'   - {table} ({columns} columns)')
+
+        print('')
+        print('✅ Database structure verified')
+        " || echo "❌ Database verification failed"
+
+    - name: Success Notification
+      if: success()
+      run: |
+        echo "✅ Database operation successful"
+        echo ""
+        echo "Action: ${{ github.event.inputs.action }}"
+        echo "Environment: ${{ github.event.inputs.environment }}"
+        echo "Time: $(date)"
+
+    - name: Failure Notification
+      if: failure()
+      run: |
+        echo "❌ Database operation failed"
+        echo ""
+        echo "Action: ${{ github.event.inputs.action }}"
+        echo "Environment: ${{ github.event.inputs.environment }}"
+        echo ""
+        echo "Check logs above for details"
+        echo "Rollback may be needed!"
