@@ -2,7 +2,7 @@ name: Deploy
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main ]  # Only deploy when code is pushed to main
   workflow_dispatch:
     inputs:
       environment:
@@ -13,6 +13,11 @@ on:
         options:
           - dev
           - staging
+
+# Prevent concurrent deployments
+concurrency:
+  group: deployment
+  cancel-in-progress: false
 
 jobs:
   deploy-dev:
