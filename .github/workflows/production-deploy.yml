@@ -67,7 +67,7 @@ jobs:
         aws-region: ${{ env.AWS_REGION }}
 
     - name: Set up Terraform
-      uses: hashicorp/setup-terraform@v2
+      uses: hashicorp/setup-terraform@v3
       with:
         terraform_version: 1.6.0
 
@@ -121,6 +121,7 @@ jobs:
         echo "🧪 Running production smoke tests..."
 
         ENDPOINT=$(aws elbv2 describe-load-balancers \
+          --region $AWS_REGION \
           --query 'LoadBalancers[?contains(LoadBalancerName, `production`)].DNSName' \
           --output text)
 
@@ -146,6 +147,7 @@ jobs:
 
         # Check service status
         aws ecs describe-services \
+          --region $AWS_REGION \
           --cluster ai-voice-sms-production \
           --services ai-voice-sms-api \
           --query 'services[0].[serviceName,status,runningCount,desiredCount]' \

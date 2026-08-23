@@ -42,7 +42,7 @@ jobs:
         aws-region: ${{ env.AWS_REGION }}
 
     - name: Set up Terraform
-      uses: hashicorp/setup-terraform@v2
+      uses: hashicorp/setup-terraform@v3
       with:
         terraform_version: 1.6.0
 
@@ -136,10 +136,15 @@ jobs:
         esac
 
         # Try to get detailed status
-        aws ec2 describe-instances --filters "Name=tag:Environment,Values=${{ github.event.inputs.environment }}" --query 'Reservations[*].Instances[*].[InstanceId,State.Name]' --output table || echo "ECS Fargate - no EC2 instances"
+        aws ec2 describe-instances \
+          --region $AWS_REGION \
+          --filters "Name=tag:Environment,Values=${{ github.event.inputs.environment }}" \
+          --query 'Reservations[*].Instances[*].[InstanceId,State.Name]' \
+          --output table 2>/dev/null || echo "ECS Fargate - no EC2 instances"
 
         # Check ECS services
         aws ecs describe-services \
+          --region $AWS_REGION \
           --cluster ai-voice-sms-${{ github.event.inputs.environment }} \
           --services ai-voice-sms-api \
           --query 'services[*].[serviceName,status,runningCount,desiredCount]' \
@@ -147,6 +152,7 @@ jobs:
 
         # Check RDS
         aws rds describe-db-instances \
+          --region $AWS_REGION \
           --query 'DBInstances[?contains(DBInstanceIdentifier, `${{ github.event.inputs.environment }}`)][DBInstanceIdentifier,DBInstanceStatus]' \
           --output table 2>/dev/null || echo "No RDS instances found"
 
